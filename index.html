@@ -1,0 +1,445 @@
+<html>
+	<head>
+		<title>Dindi-link</title>
+		<meta charset="UTF-8">
+		<style>
+			canvas {
+				width: 100%;
+				height: 100%;
+			}
+			
+			* {
+				font-family: monospace;
+				font-weight: bold;
+			}
+			
+			html, body {
+				width: 100%;
+				height: 100%;
+				padding: 0;
+				margin: 0;
+			}
+			
+			
+			#dialog {
+				position: absolute;
+				width: 100%;
+				height: 100%;
+				z-index: 997;
+				top: 0;
+				left: 0;
+			}
+			
+			#dialog > #shadow {
+				position: absolute;
+				width: 100%;
+				height: 100%;
+				z-index: 998;
+				top: 0;
+				left: 0;
+				background-color: #0007;
+			}
+			
+			#dialog > #content {
+				position: relative;
+				padding: 1rem;
+				z-index: 999;
+				left: 0; 
+				right: 0; 
+				margin-left: auto; 
+				margin-right: auto;
+				top: 2rem;
+				width: 25%;
+				background-color: #fff;
+			}
+			
+			#dialog > #content > #title {
+				font-size: 1.5rem;
+				margin-bottom: 0.5rem;
+			}
+			
+			#dialog > #content > #form {
+				width: 100%;
+			}
+			
+			div.input-field {
+				display: flex;
+				flex-direction: row;
+				flex-wrap: nowrap;
+				justify-content: space-between;
+				width: calc(100% - 1rem);
+				border: thin solid #aaf;
+				padding: 0.5rem;
+				margin-bottom: 0.5rem;
+			}
+			
+			div.input-field > label {
+				padding: 0.25rem;
+			}
+			
+			div.input-field > div {
+				display: flex;
+				flex-direction: row;
+				flex-wrap: nowrap;
+				gap: 0.5rem;
+			}
+			
+			div.input-field > div > input {
+				background-color: #eee;
+				border: thin solid #aaf;
+				box-sizing: border-box;
+				padding: 0.25rem;
+			}
+			
+			div.input-field > div > input:hover {
+				box-shadow: #77f 0px 0px 0px 0.1rem;
+				opacity: 0.75;
+			}
+			
+			div.input-field > div > input:active {
+				border: thin solid #77f;
+			}
+			
+			div.input-field > div > input[type="button"]:active {
+				background-color: #77e;
+			}
+			
+			
+			#config {
+				position: absolute;
+				width: 1rem;
+				height: 1rem;
+				bottom: 1rem;
+				right: 1rem;
+				overflow: hidden;
+				font-size: 1rem;
+				cursor: pointer;
+				user-select: none;
+			}
+		</style>
+	</head>
+	<body>
+		<canvas id="display">
+		</canvas>
+		<div id="dialog" style="display:none;">
+			<div id="content">
+				<div id="title">
+					Config
+				</div>
+				<div id="form">
+				</div>
+			</div>
+			<div id="shadow" onclick="hideConfigDialog();"></div>
+		</div>
+		<div id="config" onclick="showConfigDialog();">⚙</div>
+		<script type="text/javascript" async>
+			function getCookie(name) {
+				const value = `; ${document.cookie}`;
+				const parts = value.split(`; ${name}=`);
+				if (parts.length === 2)
+					return parts.pop().split(';').shift();
+				return null;
+			}
+
+			function setCookie(cname, cvalue) {
+				const d = new Date();
+				d.setTime(d.getTime() + (36500 * 24 * 60 * 60 * 1000));
+				let expires = "expires="+ d.toUTCString();
+				document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/;domain=.pegasko.art";
+			}
+			
+			function showToast(text, duration, appearDuration) {		
+				console.error(text)		
+				if (duration <= 0)
+					throw new Error('Invalid value for duration');
+				
+				if (appearDuration <= 0)
+					throw new Error('Invalid value for appearDuration');
+				
+				// Wrapper for centering
+				var element = document.createElement('div');
+				element.style.cssText = `
+					position: fixed;
+					transition: opacity ${ appearDuration }s, bottom ${ appearDuration }s ease-in-out;
+					pointer-events: none;
+					user-select: none;
+					left: 1rem;
+					opacity: 0;
+					bottom: -3rem;
+				`;
+				
+				var inner = document.createElement('div');
+				inner.style.cssText = `
+					pointer-events: none;
+					user-select: none;
+					font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+					font-size: 1rem;
+					padding: 0.5rem;
+					line-height: calc(1rem - 0.2rem);
+					box-sizing: border-box;
+					background-color: white;
+					border: 0.1rem solid #77f;
+					color: #77f;
+					font-weight: bold;
+					text-align: center;
+					margin-left: auto;
+					margin-right: auto;
+				`;
+				inner.textContent = text;
+				
+				element.appendChild(inner);
+				document.body.appendChild(element);
+				
+				// Wait & show
+				getComputedStyle(element).opacity;
+				element.style.bottom = '1rem';
+				element.style.opacity = '1';
+				
+				// Appear + visible delay
+				setTimeout(function() {
+					// Make transparent and hide
+					element.style.bottom = '-3rem';
+					element.style.opacity = '0';
+					
+					setTimeout(function() {
+						// Dispose
+						document.body.removeChild(element);
+					}, appearDuration * 1000);
+				}, appearDuration * 1000 + duration * 1000);
+			}
+			
+			function saget(url) {
+				return new Promise((resolve, reject) => {
+					fetch(url)
+					.then((response) => {
+						if (response.status != 200) {
+							reject({
+								'status': 'error',
+								'message': response.statusText
+							});
+							return;
+						} else
+							return response.json();
+					})
+					.then((data) => {
+						if (data === undefined)
+							reject({ status: 'error', message: 'empty response' });
+						else if (data['status'] != 'result')
+							reject(data);
+						else
+							resolve(data);
+					})
+					.catch((error) => {
+						reject(error);
+					})
+				});
+			};
+			
+			function htmlToElement(html) {
+				var template = document.createElement('template');
+				html = html.trim();
+				template.innerHTML = html;
+				return template.content.firstChild;
+			};
+			
+			function fetchConfig() {
+				return new Promise((resolve, reject) => {
+					window.config = window.config ?? {};
+					if (!(window.config && window.config.password)) {
+						if (getCookie('password') === null) {
+							setCookie('password', '');
+							window.config['password'] = '';
+						} else {
+							window.config['password'] = getCookie('password');
+						}
+					}
+					
+					saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=keys`)
+					.then(async (data) => {
+						for (let i = 0; i < data.keys.length; ++i) {
+							var key = data.keys[i];
+							await new Promise((resolve2, reject2) => {
+								saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=get&key=${ key }`)
+								.then((data2) => {
+									window.config[key] = data2.value;
+									resolve2();
+								})
+								.catch((error) => {
+									console.error(error);
+									showToast(error.message, 1, 1);
+									resolve2();
+								});
+							});
+						};
+						
+						resolve(window.config);
+					})
+					.catch((error) => {
+						console.error(error);
+						showToast(error.message, 1, 1);
+						reject(error);
+					});
+				});
+			}
+			
+			function hideConfigDialog() {
+				document.getElementById('dialog').style.display='none';
+				startFetchLoop();
+			}
+			
+			async function showConfigDialog() {
+				stopFetchLoop();
+				
+				await fetchConfig()
+				.then(() => {})
+				.catch(() => {});
+				
+				document.getElementById('dialog').style.display=null;
+				var form = document.getElementById('form');
+				form.innerHTML = '';
+				
+				for (const [key, value] of Object.entries(window.config)) {
+					var element = htmlToElement(`
+					<div class="input-field">
+						<label>${ key }</label>
+						<div>
+							<input type="text" value="${ value }" id="input-${ key }">
+							<input type="button" value="set" id="submit-${ key }">
+						</div>
+					</div>`);
+					
+					form.appendChild(element);
+					document.querySelector(`#submit-${ key }`).addEventListener('click', function() {
+						let newValue = document.querySelector(`#input-${ key }`).value.trim();
+						
+						if (key === 'quality') {
+							if (!(/^\d+$/.test(newValue))) {
+								showToast('quality must be in range [1, 100]', 1, 1);
+								return;
+							}
+							newValue = parseInt(newValue);
+							if (newValue < 1 || newValue > 100) {
+								showToast('quality must be in range [1, 100]', 1, 1);
+								return;
+							}
+						} else if (key === 'fps') {
+							if (!(/^\d+$/.test(newValue))) {
+								showToast('fps must be in range [1, 60]', 1, 1);
+								return;
+							}
+							newValue = parseInt(newValue);
+							if (newValue < 1 || newValue > 100) {
+								showToast('fps must be in range [1, 60]', 1, 1);
+								return;
+							}
+						} else if (key === 'viewport') {
+							if (!(/^\d+,\d+$/.test(newValue))) {
+								showToast('viewport must be pair in range [16, inf]', 1, 1);
+								return;
+							}
+							newValue = newValue.split(',');
+							newValue = [ newValue[0], newValue[1] ];
+							if (newValue[0] < 16 || newValue[1] < 16) {
+								showToast('viewport must be pair in range [16, inf]', 1, 1);
+								return;
+							}
+							newValue = `${ newValue[0] },${ newValue[1] }`;
+						}
+						
+						var old_password = window.config['password'];
+						if (key === 'password') {
+							setCookie('password', newValue);
+							window.config['password'] = newValue;
+						}
+						
+						saget(`/config?password=${ encodeURIComponent(old_password) }&action=set&key=${ key }&value=${ newValue }`)
+						.then((data2) => {
+							window.config[key] = data2.value;
+							console.log(data2.value)
+							document.querySelector(`#input-${ key }`).value = data2.value;
+							
+							if (key === 'password') {
+								hideConfigDialog();
+							}
+						})
+						.catch((error) => {
+							console.error(error);
+							showToast(error.message, 1, 1);
+							
+							if (key === 'password') {
+								hideConfigDialog();
+							}
+						});
+					});
+				}
+			}
+			
+			function stopFetchLoop() {
+				window.fetchLoop = window.fetchLoop ?? null;
+				if (window.fetchLoop !== null) {
+					// clearTimeout(window.fetchLoop);
+					window.fetchLoop = null;
+					window.fetchLoopRunning = false;
+				}
+			}
+			
+			function startFetchLoop() {
+				window.fetchLoop = window.fetchLoop ?? null;
+				stopFetchLoop();
+				var fetchHandler;
+				window.fetchLoopRunning = true;
+				window.hasDisplayerErrorMessage = false;
+				var frameDelay = 1000.0 / (window.config.fps ?? 1);
+				window.fetchLoop = setTimeout(
+					fetchHandler = async function() {
+						if (canvas.width != window.innerWidth || canvas.height != window.innerHeight) {
+							canvas.width = window.innerWidth;
+							canvas.height = window.innerHeight;
+							
+							saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=set&key=viewport&value=${ canvas.width },${ canvas.height }`)
+							.then((data) => {})
+							.catch((error) => {
+								showToast(error.message, 1, 1);
+							});
+						}
+						
+						await new Promise(((resolve, reject) => {
+							frame = new Image();
+							frame.onload = function() {
+								window.hasDisplayerErrorMessage = false;
+								window.canvasContext.drawImage(
+									frame,
+									canvas.width / 2 - frame.width / 2,
+									canvas.height / 2 - frame.height / 2
+								);
+								resolve();
+							}
+							frame.onerror = function(error) {
+								if (!window.hasDisplayerErrorMessage) {
+									showToast('receive frame failed', 1, 1);
+									window.hasDisplayerErrorMessage = true;
+								}
+								resolve();
+							}
+							frame.src = `/capture?password=${ encodeURIComponent(window.config['password']) }&ts=${ Date.now() }`;
+						}));
+						
+						if (window.fetchLoopRunning) {
+							setTimeout(fetchHandler, frameDelay + (hasDisplayerErrorMessage ? 1000 : 0));
+						}
+					},
+					frameDelay
+				);
+			}
+			
+			(function() {
+				window.canvas = document.getElementById('display');
+				window.canvasContext = window.canvas.getContext('2d');
+				
+				fetchConfig();
+				
+				startFetchLoop();
+			}) ();
+		</script>
+	</body>
+</html>

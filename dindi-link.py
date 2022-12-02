@@ -34,6 +34,7 @@ except ImportError:
 DEFAULT_PASSWORD = ""
 DEFAULT_QUALITY = 75
 DEFAULT_VIEWPORT = (512, 512)
+DEFAULT_FPS = 20
 DEFAULT_CONFIG_FILE = 'dindi-link-config.json'
 DEFAULT_SERVER_PORT = 12345
 
@@ -69,6 +70,8 @@ def get_default(key: str):
 		return DEFAULT_VIEWPORT
 	elif key == 'server_port':
 		return DEFAULT_SERVER_PORT
+	elif key == 'fps':
+		return DEFAULT_FPS
 	else:
 		raise ValueError('invalid key')
 
@@ -90,6 +93,11 @@ def set_value(key: str, value):
 	elif key == 'server_port':
 		try:
 			config[key] = max(1, min(65535, int(value)))
+		except:
+			config[key] = get_default(key)
+	elif key == 'fps':
+		try:
+			config[key] = max(1, min(60, int(value)))
 		except:
 			config[key] = get_default(key)
 	elif key == 'viewport':
@@ -117,6 +125,7 @@ def capture_screen_buffer() -> BytesIO:
 	image = PIL.ImageGrab.grab()
 	if image.width > config['viewport'][0] or image.height > config['viewport'][1]:
 		image.thumbnail(config['viewport'], DOWNSAMPLE)
+	buffer.seek(0)
 	image.save(fp=buffer, format='JPEG', quality=config['quality'])
 	buflen = buffer.tell()
 	buffer.seek(0)
@@ -136,6 +145,7 @@ async def get__config(request: aiohttp.web.Request) -> aiohttp.web.StreamRespons
 				value: str
 			get:
 				key: str
+			keys
 		password: str
 	"""
 
@@ -173,6 +183,11 @@ async def get__config(request: aiohttp.web.Request) -> aiohttp.web.StreamRespons
 			'status': 'result',
 			'value': config.get(query__key, None)
 		})
+	elif query__action == 'keys':
+		return aiohttp.web.json_response({
+			'status': 'result',
+			'keys': list(config.keys())
+		})
 	else:
 		return aiohttp.web.json_response({
 			'status': 'error',
@@ -188,10 +203,7 @@ async def get__capture(request: aiohttp.web.Request) -> aiohttp.web.StreamRespon
 	# Check access
 	query__password = config.get('password', DEFAULT_PASSWORD)
 	if query__password != DEFAULT_PASSWORD and query__password != request.query.get('password', None):
-		return aiohttp.web.json_response({
-			'status': 'error',
-			'message': 'invalid password'
-		})
+		raise aiohttp.web.HTTPUnauthorized()
 
 	buffer, buflen = capture_screen_buffer()
 	sr = aiohttp.web.StreamResponse(
@@ -220,6 +232,7 @@ if __name__ == '__main__':
 		set_value('quality', None)
 		set_value('viewport', None)
 		set_value('server_port', None)
+		set_value('fps', None)
 
 	# Set up server
 	app = aiohttp.web.Application()
@@ -227,5 +240,6 @@ if __name__ == '__main__':
 	# Routes
 	app.router.add_get('/config', get__config)
 	app.router.add_get('/capture', get__capture)
+	app.router.add_get('/', lambda request: aiohttp.web.FileResponse('index.html'))
 
 	aiohttp.web.run_app(app=app, port=config['server_port'])

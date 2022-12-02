@@ -95,10 +95,12 @@ def set_value(key: str, value):
 	elif key == 'viewport':
 		try:
 			value = value.split(',', 1)
-			value = (min(max(value[0].strip(), MIN_VIEWPORT_DIM), MAX_VIEWPORT_DIM), min(max(value[1].strip(), MIN_VIEWPORT_DIM), MAX_VIEWPORT_DIM))
+			value = (min(max(int(value[0].strip()), MIN_VIEWPORT_DIM), MAX_VIEWPORT_DIM), min(max(int(value[1].strip()), MIN_VIEWPORT_DIM), MAX_VIEWPORT_DIM))
 
 			config[key] = value
 		except:
+			import traceback
+			traceback.print_exc()
 			config[key] = get_default(key)
 	else:
 		raise ValueError('invalid key')
@@ -154,7 +156,10 @@ async def get__config(request: aiohttp.web.Request) -> aiohttp.web.StreamRespons
 				'status': 'error',
 				'message': 'key does not exist'
 			})
-		return config.get(query__key, None)
+		return aiohttp.web.json_response({
+			'status': 'result',
+			'value': config.get(query__key, None)
+		})
 	elif query__action == 'set':
 		query__key = request.query.get('key', None)
 		if query__key not in config:
@@ -164,6 +169,10 @@ async def get__config(request: aiohttp.web.Request) -> aiohttp.web.StreamRespons
 			})
 		query__value = request.query.get('value', None)
 		set_value(query__key, query__value)
+		return aiohttp.web.json_response({
+			'status': 'result',
+			'value': config.get(query__key, None)
+		})
 	else:
 		return aiohttp.web.json_response({
 			'status': 'error',

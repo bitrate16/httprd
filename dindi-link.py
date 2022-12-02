@@ -185,6 +185,14 @@ async def get__capture(request: aiohttp.web.Request) -> aiohttp.web.StreamRespon
 	viewport settings
 	"""
 
+	# Check access
+	query__password = config.get('password', DEFAULT_PASSWORD)
+	if query__password != DEFAULT_PASSWORD and query__password != request.query.get('password', None):
+		return aiohttp.web.json_response({
+			'status': 'error',
+			'message': 'invalid password'
+		})
+
 	buffer, buflen = capture_screen_buffer()
 	sr = aiohttp.web.StreamResponse(
 		status=200,

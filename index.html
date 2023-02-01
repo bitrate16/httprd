@@ -25,31 +25,29 @@
 				position: absolute;
 				width: 100%;
 				height: 100%;
-				z-index: 997;
+				z-index: 900;
 				top: 0;
 				left: 0;
+				
+				display: flex;
+				flex-direction: column;
+				justify-content: center;
+				align-items: center;
 			}
 			
 			#dialog > #shadow {
 				position: absolute;
 				width: 100%;
 				height: 100%;
-				z-index: 998;
+				z-index: 910;
 				top: 0;
 				left: 0;
 				background-color: #0007;
 			}
 			
 			#dialog > #content {
-				position: relative;
+				z-index: 920;
 				padding: 1rem;
-				z-index: 999;
-				left: 0; 
-				right: 0; 
-				margin-left: auto; 
-				margin-right: auto;
-				top: 2rem;
-				width: 25%;
 				background-color: #fff;
 			}
 			
@@ -132,6 +130,11 @@
 			<div id="shadow" onclick="hideConfigDialog();"></div>
 		</div>
 		<div id="config" onclick="showConfigDialog();">⚙</div>
+		<script type="text/javascript">
+			
+			// window.addEventListener('load', function() {showConfigDialog();});
+			
+		</script>
 		<script type="text/javascript" async>
 			function getCookie(name) {
 				const value = `; ${document.cookie}`;
@@ -148,8 +151,8 @@
 				document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/;domain=.pegasko.art";
 			}
 			
-			function showToast(text, duration, appearDuration) {		
-				console.error(text)		
+			function showToast(text, duration, appearDuration) {
+				console.error(text)
 				if (duration <= 0)
 					throw new Error('Invalid value for duration');
 				
@@ -332,18 +335,26 @@
 								showToast('fps must be in range [1, 60]', 1, 1);
 								return;
 							}
-						} else if (key === 'viewport') {
-							if (!(/^\d+,\d+$/.test(newValue))) {
-								showToast('viewport must be pair in range [16, inf]', 1, 1);
+						} else if (key === 'width') {
+							if (!(/^\d+$/.test(newValue))) {
+								showToast('width must be pair in range [16, inf]', 1, 1);
 								return;
 							}
-							newValue = newValue.split(',');
-							newValue = [ newValue[0], newValue[1] ];
-							if (newValue[0] < 16 || newValue[1] < 16) {
-								showToast('viewport must be pair in range [16, inf]', 1, 1);
+							newValue = parseInt(newValue);
+							if (newValue < 16) {
+								showToast('width must be in range [16, inf]', 1, 1);
 								return;
 							}
-							newValue = `${ newValue[0] },${ newValue[1] }`;
+						} else if (key === 'height') {
+							if (!(/^\d+$/.test(newValue))) {
+								showToast('height must be pair in range [16, inf]', 1, 1);
+								return;
+							}
+							newValue = parseInt(newValue);
+							if (newValue < 16) {
+								showToast('height must be in range [16, inf]', 1, 1);
+								return;
+							}
 						}
 						
 						var old_password = window.config['password'];
@@ -384,25 +395,58 @@
 			}
 			
 			function startFetchLoop() {
+				// Clear old
 				window.fetchLoop = window.fetchLoop ?? null;
 				stopFetchLoop();
+				
+				// Register handler
 				var fetchHandler;
 				window.fetchLoopRunning = true;
 				window.hasDisplayerErrorMessage = false;
 				var frameDelay = 1000.0 / (window.config.fps ?? 1);
+				
+				// Last mouse vent time
+				var lastMouseTs = -1;
+				
 				window.fetchLoop = setTimeout(
 					fetchHandler = async function() {
 						if (canvas.width != window.innerWidth || canvas.height != window.innerHeight) {
 							canvas.width = window.innerWidth;
 							canvas.height = window.innerHeight;
 							
-							saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=set&key=viewport&value=${ canvas.width },${ canvas.height }`)
+							saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=set&key=width&value=${ canvas.width }`)
+							.then((data) => {})
+							.catch((error) => {
+								showToast(error.message, 1, 1);
+							});
+							
+							saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=set&key=height&value=${ canvas.height }`)
 							.then((data) => {})
 							.catch((error) => {
 								showToast(error.message, 1, 1);
 							});
 						}
 						
+						// Send mouse location
+						if (lastMouseTs < window.lastMouseTs) {
+							lastMouseTs = window.lastMouseTs;
+							
+							await new Promise(((resolve, reject) => {
+								saget(`/input?password=${ encodeURIComponent(window.config['password']) }&action=mouse&x=${ window.lastMouse.x }&y=${ window.lastMouse.y }`)
+								.then((data) => {
+									resolve();
+								})
+								.catch((error) => {
+									if (!window.hasDisplayerErrorMessage) {
+										showToast(error.message, 1, 1);
+										window.hasDisplayerErrorMessage = true;
+									}
+									resolve();
+								});	
+							}));
+						}
+						
+						// Receive new frame
 						await new Promise(((resolve, reject) => {
 							frame = new Image();
 							frame.onload = function() {
@@ -412,6 +456,11 @@
 									canvas.width / 2 - frame.width / 2,
 									canvas.height / 2 - frame.height / 2
 								);
+							
+								// Update remote viewbox
+								window.viewbox.width = frame.width;
+								window.viewbox.height = frame.height;
+								
 								resolve();
 							}
 							frame.onerror = function(error) {
@@ -425,20 +474,53 @@
 						}));
 						
 						if (window.fetchLoopRunning) {
-							setTimeout(fetchHandler, frameDelay + (hasDisplayerErrorMessage ? 1000 : 0));
+							window.fetchLoop = setTimeout(fetchHandler, frameDelay + (hasDisplayerErrorMessage ? 1000 : 0));
 						}
 					},
 					frameDelay
 				);
 			}
 			
-			(function() {
+			function startInputLoop() {
+				
+				// Input handler
+				var mouseUpdate = function(event) {
+					if (window.viewbox.width === 0 || window.viewbox === 0)
+						return;
+					
+					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
+					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
+					
+					if (
+						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
+						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
+					) {
+						window.lastMouse.x = event.pageX - rectX;
+						window.lastMouse.y = event.pageY - rectY;
+						window.lastMouseTs = Date.now();
+					}
+				};
+				
+				// Register listeners
+				window.canvas.addEventListener('mousemove', mouseUpdate);
+			}
+			
+			(async function() {
 				window.canvas = document.getElementById('display');
 				window.canvasContext = window.canvas.getContext('2d');
 				
-				fetchConfig();
+				// Init: Mouse position tracking
+				window.lastMouse = { x: -1, y: -1 };
+				window.lastMouseTs = -1;
+				
+				// Init: Viewbox size
+				window.viewbox = { width: 0, height: 0 };
+				
+				await fetchConfig();
 				
 				startFetchLoop();
+				
+				startInputLoop();
 			}) ();
 		</script>
 	</body>

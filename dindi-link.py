@@ -1,5 +1,5 @@
 # dindi-link: web-based remote desktop
-# Copyright (C) 2022  bitrate16
+# Copyright (C) 2022-2023  bitrate16
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -23,6 +23,7 @@ import aiohttp.web
 import PIL
 import PIL.Image
 import PIL.ImageGrab
+import pyautogui
 
 try:
     from cStringIO import StringIO as BytesIO
@@ -33,7 +34,8 @@ except ImportError:
 # Defaults
 DEFAULT_PASSWORD = ""
 DEFAULT_QUALITY = 75
-DEFAULT_VIEWPORT = (512, 512)
+DEFAULT_WIDTH = 512
+DEFAULT_HEIGHT = 512
 DEFAULT_FPS = 20
 DEFAULT_CONFIG_FILE = 'dindi-link-config.json'
 DEFAULT_SERVER_PORT = 12345
@@ -46,9 +48,14 @@ DOWNSAMPLE = PIL.Image.LANCZOS
 # Config
 # * password: str ("" means no password, default: "")
 # * quality: int[1-100] (default: 75)
-# * viewport: (width: int, height: int)
+# * width: int - viewport
+# * height: int - viewport
 # * port: int[1-65535]
 config = {}
+
+# Real resolution
+real_width, real_height = 0, 0
+viewbox_width, viewbox_height = 0, 0
 
 # Webapp
 app: aiohttp.web.Application
@@ -66,8 +73,10 @@ def get_default(key: str):
 		return DEFAULT_PASSWORD
 	elif key == 'quality':
 		return DEFAULT_QUALITY
-	elif key == 'viewport':
-		return DEFAULT_VIEWPORT
+	elif key == 'width':
+		return DEFAULT_WIDTH
+	elif key == 'height':
+		return DEFAULT_HEIGHT
 	elif key == 'server_port':
 		return DEFAULT_SERVER_PORT
 	elif key == 'fps':
@@ -100,15 +109,15 @@ def set_value(key: str, value):
 			config[key] = max(1, min(60, int(value)))
 		except:
 			config[key] = get_default(key)
-	elif key == 'viewport':
+	elif key == 'width':
 		try:
-			value = value.split(',', 1)
-			value = (min(max(int(value[0].strip()), MIN_VIEWPORT_DIM), MAX_VIEWPORT_DIM), min(max(int(value[1].strip()), MIN_VIEWPORT_DIM), MAX_VIEWPORT_DIM))
-
-			config[key] = value
+			config[key] = max(MIN_VIEWPORT_DIM, min(MAX_VIEWPORT_DIM, int(value)))
 		except:
-			import traceback
-			traceback.print_exc()
+			config[key] = get_default(key)
+	elif key == 'height':
+		try:
+			config[key] = max(MIN_VIEWPORT_DIM, min(MAX_VIEWPORT_DIM, int(value)))
+		except:
 			config[key] = get_default(key)
 	else:
 		raise ValueError('invalid key')
@@ -123,8 +132,18 @@ def capture_screen_buffer() -> BytesIO:
 	"""
 
 	image = PIL.ImageGrab.grab()
-	if image.width > config['viewport'][0] or image.height > config['viewport'][1]:
-		image.thumbnail(config['viewport'], DOWNSAMPLE)
+	
+	# Update real dimensions
+	global real_width, real_height
+	real_width, real_height = image.size
+	
+	if image.width > config['width'] or image.height > config['height']:
+		image.thumbnail((config['width'], config['height']), DOWNSAMPLE)
+	
+	# Update viewbox dimensions
+	global viewbox_width, viewbox_height
+	viewbox_width, viewbox_height = image.size
+	
 	buffer.seek(0)
 	image.save(fp=buffer, format='JPEG', quality=config['quality'])
 	buflen = buffer.tell()
@@ -194,6 +213,60 @@ async def get__config(request: aiohttp.web.Request) -> aiohttp.web.StreamRespons
 			'message': 'invalid action'
 		})
 
+async def get__input(request: aiohttp.web.Request) -> aiohttp.web.StreamResponse:
+	"""
+	Configuration endpoint, requires password for each request. If password is
+	not set, all requests are accepted. If password does not match, rejects
+	request.
+
+	query:
+		action:
+		password: str
+	"""
+
+	# Check access
+	query__password = config.get('password', DEFAULT_PASSWORD)
+	if query__password != DEFAULT_PASSWORD and query__password != request.query.get('password', None):
+		return aiohttp.web.json_response({
+			'status': 'error',
+			'message': 'invalid password'
+		})
+
+	# Route on action
+	query__action = request.query.get('action', None)
+	
+	# Receive mouse position relative to viewport
+	if query__action == 'mouse':
+		mouse_x = request.query.get('x', None)
+		mouse_y = request.query.get('y', None)
+		
+		try:
+			mouse_x = float(mouse_x)
+			mouse_y = float(mouse_y)
+		except:
+			return aiohttp.web.json_response({
+				'status': 'error',
+				'message': 'invalid mouse position'
+			})
+		
+		mouse_x = max(0, min(config['width'], mouse_x))
+		mouse_y = max(0, min(config['height'], mouse_y))
+		
+		# Remap to real resolution
+		mouse_x *= real_width / viewbox_width
+		mouse_y *= real_height / viewbox_height
+		
+		pyautogui.moveTo(mouse_x, mouse_y)
+		
+		return aiohttp.web.json_response({
+			'status': 'result'
+		})
+	else:
+		return aiohttp.web.json_response({
+			'status': 'error',
+			'message': 'invalid action'
+		})
+
 async def get__capture(request: aiohttp.web.Request) -> aiohttp.web.StreamResponse:
 	"""
 	Capture single display image and stream it as is using current quality and
@@ -230,7 +303,8 @@ if __name__ == '__main__':
 		# Generate default config
 		set_value('password', None)
 		set_value('quality', None)
-		set_value('viewport', None)
+		set_value('width', None)
+		set_value('height', None)
 		set_value('server_port', None)
 		set_value('fps', None)
 
@@ -239,7 +313,11 @@ if __name__ == '__main__':
 
 	# Routes
 	app.router.add_get('/config', get__config)
+	app.router.add_get('/input', get__input)
 	app.router.add_get('/capture', get__capture)
 	app.router.add_get('/', lambda request: aiohttp.web.FileResponse('index.html'))
+	
+	# Grab real resolution
+	real_width, real_height = PIL.ImageGrab.grab().size
 
 	aiohttp.web.run_app(app=app, port=config['server_port'])

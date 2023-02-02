@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-VERSION = '2.3'
+VERSION = '2.4'
 
 import time
 import json
@@ -26,6 +26,8 @@ import PIL.Image
 import PIL.ImageGrab
 import pyautogui
 import asyncio
+
+from datetime import datetime
 
 try:
     from cStringIO import StringIO as BytesIO
@@ -353,7 +355,7 @@ INDEX_CONTENT = None
 
 
 # handler for /
-def get__root(request: aiohttp.web.Request):
+async def get__root(request: aiohttp.web.Request):
 	if INDEX_CONTENT is not None:
 		return aiohttp.web.Response(body=INDEX_CONTENT, content_type='text/html', status=200, charset='utf-8')
 	else:
@@ -380,7 +382,13 @@ if __name__ == '__main__':
 		set_config_value('ips', None)
 
 	# Set up server
-	app = aiohttp.web.Application()
+	async def log_middleware(request: aiohttp.web.Request, handler):
+		now = datetime.now()
+		now = now.strftime("%d.%m.%Y-%H:%M:%S")
+		print(f'[{ now }] { request.remote } { request.method } { request.path_qs }')
+		return await handler(request)
+
+	app = aiohttp.web.Application(middlewares=[log_middleware])
 
 	# Routes
 	app.router.add_get('/config', get__config)

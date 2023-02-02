@@ -15,5 +15,5 @@ page = page.replace('\n\n', '\n')
 page = json.dumps(page)
 httprd = httprd.replace('INDEX_CONTENT = None', f'INDEX_CONTENT = { page }')
 
-with open('httprd-full.py', 'w', encoding='utf-8') as f:
+with open('./../httprd.py', 'w', encoding='utf-8') as f:
 	f.write(httprd)

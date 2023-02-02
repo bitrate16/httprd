@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-VERSION = '2.4'
+VERSION = '2.5'
 
 import time
 import json
@@ -76,6 +76,11 @@ viewbox_width, viewbox_height = 0, 0
 # Webapp
 app: aiohttp.web.Application
 
+# Log request details
+def log_request(request: aiohttp.web.Request):
+	now = datetime.now()
+	now = now.strftime("%d.%m.%Y-%H:%M:%S")
+	print(f'[{ now }] { request.remote } { request.method } { request.path_qs }')
 
 def get_config_default(key: str):
 	"""
@@ -188,6 +193,8 @@ async def get__config(request: aiohttp.web.Request) -> aiohttp.web.StreamRespons
 		password: str
 	"""
 
+	log_request(request)
+
 	# Check access
 	query__password = config.get('password', DEFAULT_PASSWORD)
 	if query__password != DEFAULT_PASSWORD and query__password != request.query.get('password', None):
@@ -231,6 +238,8 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 	"""
 	Capture display stream and write it as JPEG stream via Websocket, so receive input
 	"""
+
+	log_request(request)
 
 	# Check access
 	query__password = config.get('password', DEFAULT_PASSWORD)
@@ -356,6 +365,8 @@ INDEX_CONTENT = "<html>\n<head>\n<title>HTTPRD</title>\n<meta charset=\"UTF-8\">
 
 # handler for /
 async def get__root(request: aiohttp.web.Request):
+	log_request(request)
+
 	if INDEX_CONTENT is not None:
 		return aiohttp.web.Response(body=INDEX_CONTENT, content_type='text/html', status=200, charset='utf-8')
 	else:
@@ -382,13 +393,7 @@ if __name__ == '__main__':
 		set_config_value('ips', None)
 
 	# Set up server
-	async def log_middleware(request: aiohttp.web.Request, handler):
-		now = datetime.now()
-		now = now.strftime("%d.%m.%Y-%H:%M:%S")
-		print(f'[{ now }] { request.remote } { request.method } { request.path_qs }')
-		return await handler(request)
-
-	app = aiohttp.web.Application(middlewares=[log_middleware])
+	app = aiohttp.web.Application()
 
 	# Routes
 	app.router.add_get('/config', get__config)

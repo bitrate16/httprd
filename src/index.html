@@ -1,26 +1,25 @@
 <html>
 	<head>
-		<title>Dindi-link</title>
+		<title>HTTPRD</title>
 		<meta charset="UTF-8">
 		<style>
 			canvas {
 				width: 100%;
 				height: 100%;
 			}
-			
+
 			* {
 				font-family: monospace;
 				font-weight: bold;
 			}
-			
+
 			html, body {
 				width: 100%;
 				height: 100%;
 				padding: 0;
 				margin: 0;
 			}
-			
-			
+
 			#dialog {
 				position: absolute;
 				width: 100%;
@@ -28,13 +27,13 @@
 				z-index: 900;
 				top: 0;
 				left: 0;
-				
+
 				display: flex;
 				flex-direction: column;
 				justify-content: center;
 				align-items: center;
 			}
-			
+
 			#dialog > #shadow {
 				position: absolute;
 				width: 100%;
@@ -44,22 +43,22 @@
 				left: 0;
 				background-color: #0007;
 			}
-			
+
 			#dialog > #content {
 				z-index: 920;
 				padding: 1rem;
 				background-color: #fff;
 			}
-			
+
 			#dialog > #content > #title {
 				font-size: 1.5rem;
 				margin-bottom: 0.5rem;
 			}
-			
+
 			#dialog > #content > #form {
 				width: 100%;
 			}
-			
+
 			div.input-field {
 				display: flex;
 				flex-direction: row;
@@ -70,39 +69,38 @@
 				padding: 0.5rem;
 				margin-bottom: 0.5rem;
 			}
-			
+
 			div.input-field > label {
 				padding: 0.25rem;
 			}
-			
+
 			div.input-field > div {
 				display: flex;
 				flex-direction: row;
 				flex-wrap: nowrap;
 				gap: 0.5rem;
 			}
-			
+
 			div.input-field > div > input {
 				background-color: #eee;
 				border: thin solid #aaf;
 				box-sizing: border-box;
 				padding: 0.25rem;
 			}
-			
+
 			div.input-field > div > input:hover {
 				box-shadow: #77f 0px 0px 0px 0.1rem;
 				opacity: 0.75;
 			}
-			
+
 			div.input-field > div > input:active {
 				border: thin solid #77f;
 			}
-			
+
 			div.input-field > div > input[type="button"]:active {
 				background-color: #77e;
 			}
-			
-			
+
 			#config {
 				position: absolute;
 				width: 1rem;
@@ -130,12 +128,13 @@
 			<div id="shadow" onclick="hideConfigDialog();"></div>
 		</div>
 		<div id="config" onclick="showConfigDialog();">⚙</div>
-		<script type="text/javascript">
-			
-			// window.addEventListener('load', function() {showConfigDialog();});
-			
-		</script>
 		<script type="text/javascript" async>
+
+			const INPUT_EVENT_MOUSE_MOVE   = 0;
+			const INPUT_EVENT_MOUSE_DOWN   = 1;
+			const INPUT_EVENT_MOUSE_UP     = 2;
+			const INPUT_EVENT_MOUSE_SCROLL = 3;
+
 			function getCookie(name) {
 				const value = `; ${document.cookie}`;
 				const parts = value.split(`; ${name}=`);
@@ -150,15 +149,15 @@
 				let expires = "expires="+ d.toUTCString();
 				document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/;domain=.pegasko.art";
 			}
-			
+
 			function showToast(text, duration, appearDuration) {
 				console.error(text)
 				if (duration <= 0)
 					throw new Error('Invalid value for duration');
-				
+
 				if (appearDuration <= 0)
 					throw new Error('Invalid value for appearDuration');
-				
+
 				// Wrapper for centering
 				var element = document.createElement('div');
 				element.style.cssText = `
@@ -170,7 +169,7 @@
 					opacity: 0;
 					bottom: -3rem;
 				`;
-				
+
 				var inner = document.createElement('div');
 				inner.style.cssText = `
 					pointer-events: none;
@@ -189,28 +188,28 @@
 					margin-right: auto;
 				`;
 				inner.textContent = text;
-				
+
 				element.appendChild(inner);
 				document.body.appendChild(element);
-				
+
 				// Wait & show
 				getComputedStyle(element).opacity;
 				element.style.bottom = '1rem';
 				element.style.opacity = '1';
-				
+
 				// Appear + visible delay
 				setTimeout(function() {
 					// Make transparent and hide
 					element.style.bottom = '-3rem';
 					element.style.opacity = '0';
-					
+
 					setTimeout(function() {
 						// Dispose
 						document.body.removeChild(element);
 					}, appearDuration * 1000);
 				}, appearDuration * 1000 + duration * 1000);
 			}
-			
+
 			function saget(url) {
 				return new Promise((resolve, reject) => {
 					fetch(url)
@@ -237,14 +236,14 @@
 					})
 				});
 			};
-			
+
 			function htmlToElement(html) {
 				var template = document.createElement('template');
 				html = html.trim();
 				template.innerHTML = html;
 				return template.content.firstChild;
 			};
-			
+
 			function fetchConfig() {
 				return new Promise((resolve, reject) => {
 					window.config = window.config ?? {};
@@ -256,26 +255,10 @@
 							window.config['password'] = getCookie('password');
 						}
 					}
-					
-					saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=keys`)
+
+					saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=get`)
 					.then(async (data) => {
-						for (let i = 0; i < data.keys.length; ++i) {
-							var key = data.keys[i];
-							await new Promise((resolve2, reject2) => {
-								saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=get&key=${ key }`)
-								.then((data2) => {
-									window.config[key] = data2.value;
-									resolve2();
-								})
-								.catch((error) => {
-									console.error(error);
-									showToast(error.message, 1, 1);
-									resolve2();
-								});
-							});
-						};
-						
-						resolve(window.config);
+						resolve(window.config = data.config);
 					})
 					.catch((error) => {
 						console.error(error);
@@ -284,23 +267,23 @@
 					});
 				});
 			}
-			
+
 			function hideConfigDialog() {
 				document.getElementById('dialog').style.display='none';
 				startFetchLoop();
 			}
-			
+
 			async function showConfigDialog() {
 				stopFetchLoop();
-				
+
 				await fetchConfig()
 				.then(() => {})
 				.catch(() => {});
-				
+
 				document.getElementById('dialog').style.display=null;
 				var form = document.getElementById('form');
 				form.innerHTML = '';
-				
+
 				for (const [key, value] of Object.entries(window.config)) {
 					var element = htmlToElement(`
 					<div class="input-field">
@@ -310,11 +293,11 @@
 							<input type="button" value="set" id="submit-${ key }">
 						</div>
 					</div>`);
-					
+
 					form.appendChild(element);
 					document.querySelector(`#submit-${ key }`).addEventListener('click', function() {
 						let newValue = document.querySelector(`#input-${ key }`).value.trim();
-						
+
 						if (key === 'quality') {
 							if (!(/^\d+$/.test(newValue))) {
 								showToast('quality must be in range [1, 100]', 1, 1);
@@ -356,19 +339,18 @@
 								return;
 							}
 						}
-						
+
 						var old_password = window.config['password'];
 						if (key === 'password') {
 							setCookie('password', newValue);
 							window.config['password'] = newValue;
 						}
-						
+
 						saget(`/config?password=${ encodeURIComponent(old_password) }&action=set&key=${ key }&value=${ newValue }`)
 						.then((data2) => {
 							window.config[key] = data2.value;
-							console.log(data2.value)
 							document.querySelector(`#input-${ key }`).value = data2.value;
-							
+
 							if (key === 'password') {
 								hideConfigDialog();
 							}
@@ -376,7 +358,7 @@
 						.catch((error) => {
 							console.error(error);
 							showToast(error.message, 1, 1);
-							
+
 							if (key === 'password') {
 								hideConfigDialog();
 							}
@@ -384,142 +366,265 @@
 					});
 				}
 			}
-			
+
 			function stopFetchLoop() {
-				window.fetchLoop = window.fetchLoop ?? null;
-				if (window.fetchLoop !== null) {
-					// clearTimeout(window.fetchLoop);
-					window.fetchLoop = null;
+				window.fetchLoopRunning = window.fetchLoopRunning ?? false;
+				if (window.fetchLoopRunning) {
 					window.fetchLoopRunning = false;
+					window.remoteSocketTs = 0;
 				}
 			}
-			
+
 			function startFetchLoop() {
 				// Clear old
-				window.fetchLoop = window.fetchLoop ?? null;
+				window.fetchLoopRunning = window.fetchLoopRunning ?? false;
 				stopFetchLoop();
-				
-				// Register handler
-				var fetchHandler;
+
+				// Is started at least one loop
 				window.fetchLoopRunning = true;
-				window.hasDisplayerErrorMessage = false;
+
+				// Delay steps
 				var frameDelay = 1000.0 / (window.config.fps ?? 1);
-				
+				var inputDelay = 1000.0 / (window.config.ips ?? 1);
+
 				// Last mouse vent time
 				var lastMouseTs = -1;
-				
-				window.fetchLoop = setTimeout(
-					fetchHandler = async function() {
+
+				var connectToRemote = function() {
+
+					// Current socket timestamp, prevent stacking
+					var remoteSocketTs = window.remoteSocketTs = Date.now();
+
+					// Create socket for frames stream
+					var remoteSocket = null;
+					var frames_received = 0;
+
+					var closeConnection = function() {
+						if (remoteSocket !== null) {
+							try { remoteSocket.close(); } catch {}
+							remoteSocket = null;
+
+							// Info
+							showToast('Connection closed', 1, 1);
+
+							// Restart
+							if (window.fetchLoopRunning && remoteSocketTs === window.remoteSocketTs)
+								connectToRemote();
+						}
+					};
+
+					// Receive frames from server
+					var frame_worker = function(msg) {
+						var url = URL.createObjectURL(msg.data);
+						var frame = new Image();
+						frame.onload = function() {
+							URL.revokeObjectURL(url);
+
+							window.canvasContext.drawImage(
+								frame,
+								canvas.width / 2 - frame.width / 2,
+								canvas.height / 2 - frame.height / 2
+							);
+
+							// Update remote viewbox
+							window.viewbox.width = frame.width;
+							window.viewbox.height = frame.height;
+
+							// Send ACK
+							try {
+								remoteSocket.send('FA');
+							} catch {}
+
+							++frames_received;
+						};
+						frame.src = url;
+
+						// Close connection on stop / disconnect
+						if (remoteSocketTs !== window.remoteSocketTs) {
+							closeConnection();
+						}
+					};
+
+					// Send input state & check open status
+					var input_worker = function(msg) {
+
+						// Close on socket update
+						if (remoteSocketTs !== window.remoteSocketTs) {
+							closeConnection();
+							return;
+						} else if (remoteSocket === null) {
+							return;
+						}
+
+						// Update viewport
 						if (canvas.width != window.innerWidth || canvas.height != window.innerHeight) {
 							canvas.width = window.innerWidth;
 							canvas.height = window.innerHeight;
-							
+
+							// Update props for view
+							window.lineHeight = window.getComputedStyle(document.body).lineHeight;
+							window.pageHeight = window.clientHeight;
+
 							saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=set&key=width&value=${ canvas.width }`)
 							.then((data) => {})
 							.catch((error) => {
 								showToast(error.message, 1, 1);
 							});
-							
+
 							saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=set&key=height&value=${ canvas.height }`)
 							.then((data) => {})
 							.catch((error) => {
 								showToast(error.message, 1, 1);
 							});
 						}
-						
+
 						// Send mouse location
-						if (lastMouseTs < window.lastMouseTs) {
-							lastMouseTs = window.lastMouseTs;
-							
-							await new Promise(((resolve, reject) => {
-								saget(`/input?password=${ encodeURIComponent(window.config['password']) }&action=mouse&x=${ window.lastMouse.x }&y=${ window.lastMouse.y }`)
-								.then((data) => {
-									resolve();
-								})
-								.catch((error) => {
-									if (!window.hasDisplayerErrorMessage) {
-										showToast(error.message, 1, 1);
-										window.hasDisplayerErrorMessage = true;
-									}
-									resolve();
-								});	
-							}));
+						if (window.inputEvents.length !== 0 && frames_received !== 0) {
+							try {
+								let events = window.inputEvents;
+								window.inputEvents = [];
+								remoteSocket.send(JSON.stringify(events));
+							} catch {}
 						}
-						
-						// Receive new frame
-						await new Promise(((resolve, reject) => {
-							frame = new Image();
-							frame.onload = function() {
-								window.hasDisplayerErrorMessage = false;
-								window.canvasContext.drawImage(
-									frame,
-									canvas.width / 2 - frame.width / 2,
-									canvas.height / 2 - frame.height / 2
-								);
-							
-								// Update remote viewbox
-								window.viewbox.width = frame.width;
-								window.viewbox.height = frame.height;
-								
-								resolve();
-							}
-							frame.onerror = function(error) {
-								if (!window.hasDisplayerErrorMessage) {
-									showToast('receive frame failed', 1, 1);
-									window.hasDisplayerErrorMessage = true;
-								}
-								resolve();
-							}
-							frame.src = `/capture?password=${ encodeURIComponent(window.config['password']) }&ts=${ Date.now() }`;
-						}));
-						
-						if (window.fetchLoopRunning) {
-							window.fetchLoop = setTimeout(fetchHandler, frameDelay + (hasDisplayerErrorMessage ? 1000 : 0));
-						}
-					},
-					frameDelay
-				);
+
+						setTimeout(input_worker, inputDelay);
+					};
+
+					// Receive only
+					console.info('connect to', `${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws`)
+					remoteSocket = new WebSocket(`${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws?password=${ encodeURIComponent(window.config['password']) }`);
+					remoteSocket.onmessage = frame_worker;
+					remoteSocket.onopen = input_worker;
+					remoteSocket.onclose = closeConnection;
+				};
+
+				connectToRemote();
 			}
-			
+
 			function startInputLoop() {
-				
+
 				// Input handler
-				var mouseUpdate = function(event) {
-					if (window.viewbox.width === 0 || window.viewbox === 0)
+				var lastMouseMoveTs = Date.now();
+				var mouseMove = function(event) {
+					// Fire only inside viewbox & with throttling to ips x 2
+					if (window.viewbox.width === 0 || window.viewbox.height === 0 || Date.now() - lastMouseMoveTs <= 1000.0 / (window.config.ips ?? 1) || window.inputEvents.length > window.config.ips * 2)
 						return;
-					
+
 					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
 					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
-					
+
+					if (
+						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
+						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
+						) {
+							window.inputEvents.push([
+								INPUT_EVENT_MOUSE_MOVE,
+								event.pageX - rectX,
+								event.pageY - rectY
+							]);
+						lastMouseMoveTs = Date.now();
+					}
+				};
+
+				// Update props for view
+				window.lineHeight = window.getComputedStyle(document.body).lineHeight;
+				window.pageHeight = window.clientHeight;
+
+				// Input handler
+				var lastMouseScrollTs = Date.now();
+				var mouseScroll = function(event) {
+					// Fire only inside viewbox & with throttling to ips x 2
+					if (window.viewbox.width === 0 || window.viewbox.height === 0 || Date.now() - lastMouseScrollTs <= 1000.0 / (window.config.ips ?? 1) || window.inputEvents.length > window.config.ips * 2)
+						return;
+
+					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
+					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
+
+					if (
+						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
+						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
+						) {
+							// Add event
+							window.inputEvents.push([
+								INPUT_EVENT_MOUSE_SCROLL,
+								event.pageX - rectX,
+								event.pageY - rectY,
+								-event.deltaY
+							]);
+						lastMouseScrollTs = Date.now();
+					}
+				};
+
+				// Input handler
+				var mouseDown = function(event) {
+					// Stop event
+					event.preventDefault();
+					event.stopPropagation();
+
+					// Check
+					if (window.viewbox.width === 0 || window.viewbox.height === 0)
+						return;
+
+					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
+					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
+
 					if (
 						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
 						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
 					) {
-						window.lastMouse.x = event.pageX - rectX;
-						window.lastMouse.y = event.pageY - rectY;
-						window.lastMouseTs = Date.now();
+						window.inputEvents.push([
+							INPUT_EVENT_MOUSE_DOWN,
+							event.pageX - rectX,
+							event.pageY - rectY,
+							event.button,
+						]);
 					}
 				};
-				
+
+				// Input handler
+				var mouseUp = function(event) {
+					// Stop event
+					event.preventDefault();
+					event.stopPropagation();
+
+					// Check
+					if (window.viewbox.width === 0 || window.viewbox.height === 0)
+						return;
+
+					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
+					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
+
+					window.inputEvents.push([
+						INPUT_EVENT_MOUSE_UP,
+						event.pageX - rectX,
+						event.pageY - rectY,
+						event.button,
+					]);
+				};
+
 				// Register listeners
-				window.canvas.addEventListener('mousemove', mouseUpdate);
+				window.canvas.addEventListener('mousemove', mouseMove);
+				window.canvas.addEventListener('wheel', mouseScroll);
+				window.canvas.addEventListener('mousedown', mouseDown);
+				window.canvas.addEventListener('mouseup', mouseUp);
+				window.canvas.addEventListener('contextmenu', function(event) { event.preventDefault(); event.stopPropagation();  false; });
 			}
-			
+
 			(async function() {
 				window.canvas = document.getElementById('display');
 				window.canvasContext = window.canvas.getContext('2d');
-				
-				// Init: Mouse position tracking
-				window.lastMouse = { x: -1, y: -1 };
-				window.lastMouseTs = -1;
-				
-				// Init: Viewbox size
+
+				// Input events buffer
+				window.inputEvents = [];
+
+				// Viewbox size
 				window.viewbox = { width: 0, height: 0 };
-				
+
+				// Load config
 				await fetchConfig();
-				
+
+				// Start loops
 				startFetchLoop();
-				
 				startInputLoop();
 			}) ();
 		</script>

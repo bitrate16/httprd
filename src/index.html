@@ -270,21 +270,24 @@
 
 			function hideConfigDialog() {
 				document.getElementById('dialog').style.display='none';
-				startFetchLoop();
+				// startFetchLoop();
+				startWorkerLoop();
 			}
 
 			async function showConfigDialog() {
-				stopFetchLoop();
+				// stopFetchLoop();
+				
+				stopWorkerLoop();
 
-				await fetchConfig()
-				.then(() => {})
-				.catch(() => {});
+				// await fetchConfig()
+				// .then(() => {})
+				// .catch(() => {});
 
 				document.getElementById('dialog').style.display=null;
 				var form = document.getElementById('form');
 				form.innerHTML = '';
 
-				for (const [key, value] of Object.entries(window.config)) {
+				for (const [key, value] of Object.entries(get_props())) {
 					var element = htmlToElement(`
 					<div class="input-field">
 						<label>${ key }</label>
@@ -297,72 +300,8 @@
 					form.appendChild(element);
 					document.querySelector(`#submit-${ key }`).addEventListener('click', function() {
 						let newValue = document.querySelector(`#input-${ key }`).value.trim();
-
-						if (key === 'quality') {
-							if (!(/^\d+$/.test(newValue))) {
-								showToast('quality must be in range [1, 100]', 1, 1);
-								return;
-							}
-							newValue = parseInt(newValue);
-							if (newValue < 1 || newValue > 100) {
-								showToast('quality must be in range [1, 100]', 1, 1);
-								return;
-							}
-						} else if (key === 'fps') {
-							if (!(/^\d+$/.test(newValue))) {
-								showToast('fps must be in range [1, 60]', 1, 1);
-								return;
-							}
-							newValue = parseInt(newValue);
-							if (newValue < 1 || newValue > 100) {
-								showToast('fps must be in range [1, 60]', 1, 1);
-								return;
-							}
-						} else if (key === 'width') {
-							if (!(/^\d+$/.test(newValue))) {
-								showToast('width must be pair in range [16, inf]', 1, 1);
-								return;
-							}
-							newValue = parseInt(newValue);
-							if (newValue < 16) {
-								showToast('width must be in range [16, inf]', 1, 1);
-								return;
-							}
-						} else if (key === 'height') {
-							if (!(/^\d+$/.test(newValue))) {
-								showToast('height must be pair in range [16, inf]', 1, 1);
-								return;
-							}
-							newValue = parseInt(newValue);
-							if (newValue < 16) {
-								showToast('height must be in range [16, inf]', 1, 1);
-								return;
-							}
-						}
-
-						var old_password = window.config['password'];
-						if (key === 'password') {
-							setCookie('password', newValue);
-							window.config['password'] = newValue;
-						}
-
-						saget(`/config?password=${ encodeURIComponent(old_password) }&action=set&key=${ key }&value=${ newValue }`)
-						.then((data2) => {
-							window.config[key] = data2.value;
-							document.querySelector(`#input-${ key }`).value = data2.value;
-
-							if (key === 'password') {
-								hideConfigDialog();
-							}
-						})
-						.catch((error) => {
-							console.error(error);
-							showToast(error.message, 1, 1);
-
-							if (key === 'password') {
-								hideConfigDialog();
-							}
-						});
+						set_prop(key, newValue);
+						showToast(`Set value for ${ key }`, 1, 1);
 					});
 				}
 			}
@@ -644,10 +583,83 @@
 			
 			
 			
+				
+			// Default props
+			const DEFAULTS = {
+				'password': '',
+				'quality': 75,
+				'fps': 20,
+				'ips': 5
+			};
+			
+			var props = null;
+			
+			// Init default or stored props values
+			function init_props() {
+				props = { ...DEFAULTS };
+				
+				try {
+					var localProps = JSON.parse(localStorage.getItem('httprd-props'));
+					for (const [key, _] of Object.entries(props)) {
+						var v = localProps[key];
+						if (v)
+							props[key] = v;
+					}
+				} catch {}
+			};
+			
+			function get_prop(name) {
+				return props[name];
+			};
+			
+			function get_props() {
+				return props;
+			}
+			
+			function set_prop(name, value) {
+				if (name === 'password') {
+					value = value.trim();
+				} else if (name === 'quality') {
+					try {
+						value = parseInt(value);
+					} catch (e) {
+						throw new Error('quality must be in range [1, 100]');
+					}
+					
+					if (value < 1 || value > 100)
+						throw new Error('quality must be in range [1, 100]');
+				} else if (name === 'fps') {
+					try {
+						value = parseInt(value);
+					} catch (e) {
+						throw new Error('fps must be in range [1, inf]');
+					}
+					
+					if (value < 1)
+						throw new Error('fps must be in range [1]');
+				} else if (name === 'ips') {
+					try {
+						value = parseInt(value);
+					} catch (e) {
+						throw new Error('ips must be in range [1, inf]');
+					}
+					
+					if (value < 1)
+						throw new Error('ips must be in range [1]');
+				}
+				
+				props[name] = value;
+				localStorage.setItem('httprd-props', JSON.stringify(props));
+			};
+			
+			
 			var remoteSocket = null;
+			window.workerLoopRunning = false;
 			
 			function stopWorkerLoop() {
 				console.info('stopWorkerLoop() : stopping loop');
+				
+				window.workerLoopRunning = false;
 				
 				try {
 					if (window.workerLoopTs) {
@@ -659,6 +671,18 @@
 				}
 			}
 			
+			
+			function get_prop(name) {
+				if (props === null) {
+					// Request
+					// requestProps();
+					
+					// Default
+					return DEFAULTS[name];
+				} else
+					return props[name];
+			};
+			
 			function startWorkerLoop() {
 				console.info('startWorkerLoop() : starting loop');
 				
@@ -667,56 +691,15 @@
 				if (window.workerLoopTs && loopTs > window.workerLoopTs) 
 					stopWorkerLoop();
 				window.workerLoopTs = loopTs;
+				window.workerLoopRunning = true;
 				
 				// Check if loop is still running
 				function checkLoop() {
 					return loopTs == window.workerLoopTs;
 				}
 				
-				
-				var requestProps = function() {
-					var requestProps__buffer = new Uint8Array(1);
-					console.info('requestProps() : requesting props');
-					
-					// Skip if loop is closed
-					if (!checkLoop())
-						return;
-					
-					try {
-						// Send packet type
-						encode_int8(0x05, requestProps__buffer, 0);
-					
-						// Actually, send
-						remoteSocket.send(requestProps__buffer.buffer)
-					} catch (e) {
-						console.error(e);
-					}
-				};
-				
-				// Default props
-				const DEFAULTS = {
-					'password': '',
-					'quality': 75,
-					'fps': 20,
-					'ips': 5,
-					'port': 7417
-				};
-				
-				var props = null;
-				
-				function get_prop(name) {
-					if (props === null) {
-						// Request
-						// requestProps();
-						
-						// Default
-						return DEFAULTS[name];
-					} else
-						return props[name];
-				};
-				
 				var requestFrame = function() {
-					var requestFrame__buffer = new Uint8Array(1 + 2 + 2);
+					var requestFrame__buffer = new Uint8Array(1 + 2 + 2 + 1);
 					console.info('requestFrame() : requesting frame');
 					
 					// Skip if loop is closed
@@ -728,10 +711,12 @@
 						encode_int8(0x01, requestFrame__buffer, 0);
 						
 						// Send width & height					
-						let viewport_width = Math.max(Math.min(window.innerWidth, 65535), 0);
-						let viewport_height = Math.max(Math.min(window.innerHeight, 65535), 0);
+						let viewport_width = Math.max(Math.min(window.innerWidth, 65535), 1);
+						let viewport_height = Math.max(Math.min(window.innerHeight, 65535), 1);
+						let quality = Math.max(Math.min(get_prop('quality'), 100), 1);
 						encode_int16(viewport_width, requestFrame__buffer, 1);
 						encode_int16(viewport_height, requestFrame__buffer, 3);
+						encode_int8(quality, requestFrame__buffer, 5);
 					
 						// Actually, send
 						remoteSocket.send(requestFrame__buffer.buffer)
@@ -741,8 +726,8 @@
 				};
 				
 				function msg_handler(msg) {
-					console.info('msg_handler() : processing msg');
-					console.info(msg);
+					// console.info('msg_handler() : processing msg');
+					
 					if (msg.data instanceof ArrayBuffer) {
 						var data = new Uint8Array(msg.data);
 						var packet_type = decode_int8(data, 0);
@@ -751,7 +736,7 @@
 						
 						// Frame
 						if (packet_type == 0x02) {
-							console.info('msg_handler() : processing frame');
+							// console.info('msg_handler() : processing frame');
 							
 							try {
 								var blob = new Blob([ data.slice(1) ], { type: 'image/jpeg' });
@@ -810,13 +795,15 @@
 				function close_handler(event) {
 					console.info('close_handler() : stopping loop');
 					
-					// Reconnect
-					showToast('Connection closed', 1, 1);
-					startWorkerLoop();
+					// Reconnect if loop was not terminated externally
+					if (window.workerLoopRunning) {
+						showToast('Connection closed', 1, 1);
+						startWorkerLoop();
+					}
 				};
 				
 				console.info('connect to', `${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws`)
-				remoteSocket = new WebSocket(`${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws`); // TODO: ?password=${ encodeURIComponent(window.config['httprd__password']) }`);
+				remoteSocket = new WebSocket(`${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws?password=${ encodeURIComponent(get_prop('password')) }`);
 				remoteSocket.binaryType = 'arraybuffer';
 				remoteSocket.onmessage = msg_handler;
 				remoteSocket.onopen = open_handler;
@@ -833,9 +820,9 @@
 				// Viewbox size
 				window.viewbox = { width: 0, height: 0 };
 
-				// Load config
-				// await fetchConfig();
-
+				// Init config
+				init_props()
+				
 				// Start loops
 				startWorkerLoop();
 				// startFetchLoop();

@@ -21,6 +21,7 @@ import json
 import typing
 import aiohttp
 import aiohttp.web
+import argparse
 import PIL
 import PIL.Image
 import PIL.ImageGrab
@@ -37,108 +38,12 @@ except ImportError:
 # Failsafe disable
 pyautogui.FAILSAFE = False
 
-# Defaults for client config
-DEFAULTS = {
-	'password': '',
-	'quality': 75,
-	'fps': 20,
-	'ips': 5,
-	'port': 7417
-}
+# Const config
+DOWNSAMPLE = PIL.Image.NEAREST
+	
+# Args
+args = {}	
 
-PROPS_KEYS = list(DEFAULTS.keys())
-
-# Config
-CONFIG_FILE = 'httprd-config.json'
-MIN_VIEWPORT_DIM = 16
-MAX_VIEWPORT_DIM = 2048
-DOWNSAMPLE = PIL.Image.LANCZOS
-
-# Props
-props = {}
-
-# Props getter
-def get_prop(name: str):
-	global props
-	
-	# Read if not exists
-	if props is None:
-		try:
-			with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-				props = json.load(f)
-		except:
-			props = dict.copy(DEFAULTS)
-	
-	# Get existing or default
-	if name not in props:
-		if name in DEFAULTS:
-			return DEFAULTS[name]
-		else:
-			return None
-	return props[name]
-
-# Props setter
-def set_prop(name: str, value):
-	global props
-	
-	# Read if not exists
-	if props is None:
-		try:
-			with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-				props = json.load(f)
-		except:
-			props = dict.copy(DEFAULTS)
-	
-	# Validate value
-	if name == 'password':
-		try:
-			value = value.strip()
-		except:
-			raise ValueError('password has invalid value')
-	elif name == 'quality':
-		try:
-			value = int(value)
-		except:
-			raise ValueError('quality must be int in range [1, 100]')
-		
-		if value < 1 or value > 100:
-			raise ValueError('quality must be int in range [1, 100]')
-	elif name == 'fps':
-		try:
-			value = int(value)
-		except:
-			raise ValueError('fps must be int in range [1, inf]')
-		
-		if value < 1:
-			raise ValueError('fps must be int in range [1, inf]')
-	elif name == 'ips':
-		try:
-			value = int(value)
-		except:
-			raise ValueError('ips must be int in range [1, inf]')
-		
-		if value < 1:
-			raise ValueError('ips must be int in range [1, inf]')
-	elif name == 'server_port':
-		try:
-			value = int(value)
-		except:
-			raise ValueError('server_port must be int in range [1, 65535]')
-		
-		if value < 1 or value > 65535:
-			raise ValueError('server_port must be int in range [1, 65535]')
-	else:
-		raise ValueError(f'unknown prop "{ name }"')
-	
-	# Set & write
-	if props.get(name, None) == value:
-		return
-	
-	props[name] = value
-	with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-		json.dump(props, f)
-	
-		
 
 
 # Event types
@@ -323,7 +228,7 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 	log_request(request)
 
 	# Check access
-	if get_prop('password') != config.get('password', ''):
+	if args.password != config.get('password', ''):
 		raise aiohttp.web.HTTPUnauthorized()
 
 	# Open socket
@@ -405,10 +310,9 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 				try:
 					
 					# Drop on invalid packet
-					if len(msg.data) < 4:
+					if len(msg.data) == 0:
 						continue
 					
-					# print(msg.data)
 					print()
 					print('bytes')
 					dump_bytes_dec(msg.data)
@@ -421,12 +325,12 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 					if packet_type == 0x01:
 						viewport_width = decode_int16(payload[0:2])
 						viewport_height = decode_int16(payload[2:4])
+						quality = decode_int8(payload[4:5])
 						
 						print('packet_type = ', packet_type)
 						print('viewport_width = ', viewport_width)
 						print('viewport_height = ', viewport_height)
-						
-						print(encode_int16(121))
+						print('quality = ', quality)
 						
 						# Grab frame
 						image = PIL.ImageGrab.grab()
@@ -440,7 +344,7 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 						buffer.write(encode_int8(0x02))
 						
 						# Write body
-						image.save(fp=buffer, format='JPEG', quality=get_prop('quality'))
+						image.save(fp=buffer, format='JPEG', quality=quality)
 						buflen = buffer.tell()
 						buffer.seek(0)
 						mbytes = buffer.read(buflen)
@@ -525,7 +429,17 @@ async def get__root(request: aiohttp.web.Request):
 
 
 if __name__ == '__main__':
-	print(f'httprd version { VERSION } (C) bitrate16 2022-2023 GNU GPL v3')
+	# Args
+	parser = argparse.ArgumentParser(description='Process some integers.')
+	parser.add_argument('--port', type=int, default=7417, metavar='{1..65535}', choices=range(1, 65535), help='server port')
+	parser.add_argument('--password', type=str, default=None, help='default password')
+	args = parser.parse_args()
+	
+	# Post-process args
+	if args.password is None:
+		args.password = ''
+	else:
+		args.password = args.password.strip()
 
 	# Set up server
 	app = aiohttp.web.Application()
@@ -534,7 +448,5 @@ if __name__ == '__main__':
 	app.router.add_get('/connect_ws', get__connect_ws)
 	app.router.add_get('/', get__root)
 
-	# Grab real resolution
-	real_width, real_height = PIL.ImageGrab.grab().size
-
-	aiohttp.web.run_app(app=app, port=get_prop('port'))
+	# Listen
+	aiohttp.web.run_app(app=app, port=args.port)

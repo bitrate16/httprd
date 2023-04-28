@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-VERSION = '2.5'
+VERSION = '3.1'
 
 import time
 import json
@@ -37,20 +37,109 @@ except ImportError:
 # Failsafe disable
 pyautogui.FAILSAFE = False
 
+# Defaults for client config
+DEFAULTS = {
+	'password': '',
+	'quality': 75,
+	'fps': 20,
+	'ips': 5,
+	'port': 7417
+}
 
-# Defaults
-DEFAULT_PASSWORD = ""
-DEFAULT_QUALITY = 75
-DEFAULT_WIDTH = 512
-DEFAULT_HEIGHT = 512
-DEFAULT_FPS = 20
-DEFAULT_IPS = 5
-DEFAULT_CONFIG_FILE = 'httprd-config.json'
-DEFAULT_SERVER_PORT = 7417
+PROPS_KEYS = list(DEFAULTS.keys())
 
+# Config
+CONFIG_FILE = 'httprd-config.json'
 MIN_VIEWPORT_DIM = 16
 MAX_VIEWPORT_DIM = 2048
 DOWNSAMPLE = PIL.Image.LANCZOS
+
+# Props
+props = {}
+
+# Props getter
+def get_prop(name: str):
+	global props
+	
+	# Read if not exists
+	if props is None:
+		try:
+			with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+				props = json.load(f)
+		except:
+			props = dict.copy(DEFAULTS)
+	
+	# Get existing or default
+	if name not in props:
+		if name in DEFAULTS:
+			return DEFAULTS[name]
+		else:
+			return None
+	return props[name]
+
+# Props setter
+def set_prop(name: str, value):
+	global props
+	
+	# Read if not exists
+	if props is None:
+		try:
+			with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+				props = json.load(f)
+		except:
+			props = dict.copy(DEFAULTS)
+	
+	# Validate value
+	if name == 'password':
+		try:
+			value = value.strip()
+		except:
+			raise ValueError('password has invalid value')
+	elif name == 'quality':
+		try:
+			value = int(value)
+		except:
+			raise ValueError('quality must be int in range [1, 100]')
+		
+		if value < 1 or value > 100:
+			raise ValueError('quality must be int in range [1, 100]')
+	elif name == 'fps':
+		try:
+			value = int(value)
+		except:
+			raise ValueError('fps must be int in range [1, inf]')
+		
+		if value < 1:
+			raise ValueError('fps must be int in range [1, inf]')
+	elif name == 'ips':
+		try:
+			value = int(value)
+		except:
+			raise ValueError('ips must be int in range [1, inf]')
+		
+		if value < 1:
+			raise ValueError('ips must be int in range [1, inf]')
+	elif name == 'server_port':
+		try:
+			value = int(value)
+		except:
+			raise ValueError('server_port must be int in range [1, 65535]')
+		
+		if value < 1 or value > 65535:
+			raise ValueError('server_port must be int in range [1, 65535]')
+	else:
+		raise ValueError(f'unknown prop "{ name }"')
+	
+	# Set & write
+	if props.get(name, None) == value:
+		return
+	
+	props[name] = value
+	with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+		json.dump(props, f)
+	
+		
+
 
 # Event types
 INPUT_EVENT_MOUSE_MOVE   = 0
@@ -60,13 +149,6 @@ INPUT_EVENT_MOUSE_SCROLL = 3
 
 
 # Config
-# * password: str ("" means no password, default: "")
-# * quality: int[1-100] (default: 75)
-# * width: int - viewport
-# * height: int - viewport
-# * port: int[1-65535]
-# * fps: int[1-60]
-# * ips: int[1-60]
 config = {}
 
 # Real resolution
@@ -169,7 +251,6 @@ def capture_screen_buffer(buffer: BytesIO) -> typing.Tuple[BytesIO, int]:
 	global viewbox_width, viewbox_height
 	viewbox_width, viewbox_height = image.size
 
-	buffer.seek(0)
 	image.save(fp=buffer, format='JPEG', quality=config['quality'])
 	buflen = buffer.tell()
 	buffer.seek(0)
@@ -242,18 +323,15 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 	log_request(request)
 
 	# Check access
-	query__password = config.get('password', DEFAULT_PASSWORD)
-	if query__password != DEFAULT_PASSWORD and query__password != request.query.get('password', None):
+	if get_prop('password') != config.get('password', ''):
 		raise aiohttp.web.HTTPUnauthorized()
 
 	# Open socket
 	ws = aiohttp.web.WebSocketResponse()
 	await ws.prepare(request)
 
-	# Bytes buffer
+	# Frame buffer
 	buffer = BytesIO()
-
-	last_frame_ack = 1
 
 	# Write stream
 	async def write_stream():
@@ -266,8 +344,22 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 
 			# Throttle & wait for next frame reception
 			if last_frame_ack >= last_frame_sent or (time.time() - last_frame_sent) > 10.0 / config['fps']:
-				# Send frame as is
-				buflen = capture_screen_buffer(buffer)
+				# Grab frame
+				image = PIL.ImageGrab.grab()
+
+				# Update real dimensions
+				global real_width, real_height
+				real_width, real_height = image.size
+
+				if image.width > config['width'] or image.height > config['height']:
+					image.thumbnail((config['width'], config['height']), DOWNSAMPLE)
+
+				# Update viewbox dimensions
+				global viewbox_width, viewbox_height
+				viewbox_width, viewbox_height = image.size
+
+				image.save(fp=buffer, format='JPEG', quality=config['quality'])
+				buflen = buffer.tell()
 				mbytes = buffer.read(buflen)
 				buffer.seek(0)
 
@@ -280,73 +372,132 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 			else:
 				await asyncio.sleep(0.5 / config['fps'])
 
-	# Read stream
-	async def read_stream():
+	def decode_int8(data):
+		return int.from_bytes(data[0:1], 'little')
 
-		# last ACK timestamp to track receive or timeout for resend
-		nonlocal last_frame_ack
+	def decode_int16(data):
+		return int.from_bytes(data[0:2], 'little')
+	
+	def decode_int24(data):
+		return int.from_bytes(data[0:3], 'little')
+
+	def encode_int8(i):
+		return int.to_bytes(i, 1, 'little')
+
+	def encode_int16(i):
+		return int.to_bytes(i, 2, 'little')
+	
+	def encode_int24(i):
+		return int.to_bytes(i, 3, 'little')
+
+	def dump_bytes_dec(data):
+		for i in range(len(data)):
+			print(data[i], end=' ')
+		print()
+
+	# Read stream
+	async def async_worker():
 
 		# Write frames at desired framerate
 		async for msg in ws:
 			# Receive input data
-			if msg.type == aiohttp.WSMsgType.TEXT:
+			if msg.type == aiohttp.WSMsgType.BINARY:
 				try:
-
-					# Frame ACK
-					if msg.data == 'FA':
-						last_frame_ack = time.time()
+					
+					# Drop on invalid packet
+					if len(msg.data) < 4:
 						continue
+					
+					# print(msg.data)
+					print()
+					print('bytes')
+					dump_bytes_dec(msg.data)
+					
+					# Parse params
+					packet_type = decode_int8(msg.data[0:1])
+					payload = msg.data[1:]
+					
+					# Frame request
+					if packet_type == 0x01:
+						viewport_width = decode_int16(payload[0:2])
+						viewport_height = decode_int16(payload[2:4])
+						
+						print('packet_type = ', packet_type)
+						print('viewport_width = ', viewport_width)
+						print('viewport_height = ', viewport_height)
+						
+						print(encode_int16(121))
+						
+						# Grab frame
+						image = PIL.ImageGrab.grab()
+						
+						# Resize
+						if image.width > viewport_width or image.height > viewport_height:
+							image.thumbnail((viewport_width, viewport_height), DOWNSAMPLE)
+						
+						# Write header: frame response
+						buffer.seek(0)
+						buffer.write(encode_int8(0x02))
+						
+						# Write body
+						image.save(fp=buffer, format='JPEG', quality=get_prop('quality'))
+						buflen = buffer.tell()
+						buffer.seek(0)
+						mbytes = buffer.read(buflen)
+						
+						await ws.send_bytes(mbytes)
+					
 
-					# Input data
-					data = json.loads(msg.data)
-					for event in data:
-						if event[0] == INPUT_EVENT_MOUSE_MOVE: # mouse position
-							mouse_x = max(0, min(config['width'], event[1]))
-							mouse_y = max(0, min(config['height'], event[2]))
+					# # Input data
+					# data = json.loads(msg.data)
+					# for event in data:
+					# 	if event[0] == INPUT_EVENT_MOUSE_MOVE: # mouse position
+					# 		mouse_x = max(0, min(config['width'], event[1]))
+					# 		mouse_y = max(0, min(config['height'], event[2]))
 
-							# Remap to real resolution
-							mouse_x *= real_width / viewbox_width
-							mouse_y *= real_height / viewbox_height
+					# 		# Remap to real resolution
+					# 		mouse_x *= real_width / viewbox_width
+					# 		mouse_y *= real_height / viewbox_height
 
-							pyautogui.moveTo(mouse_x, mouse_y)
-						elif event[0] == INPUT_EVENT_MOUSE_DOWN: # mouse down
-							mouse_x = max(0, min(config['width'], event[1]))
-							mouse_y = max(0, min(config['height'], event[2]))
-							button = event[3]
+					# 		pyautogui.moveTo(mouse_x, mouse_y)
+					# 	elif event[0] == INPUT_EVENT_MOUSE_DOWN: # mouse down
+					# 		mouse_x = max(0, min(config['width'], event[1]))
+					# 		mouse_y = max(0, min(config['height'], event[2]))
+					# 		button = event[3]
 
-							# Allow only left, middle, right
-							if button < 0 or button > 2:
-								continue
+					# 		# Allow only left, middle, right
+					# 		if button < 0 or button > 2:
+					# 			continue
 
-							# Remap to real resolution
-							mouse_x *= real_width / viewbox_width
-							mouse_y *= real_height / viewbox_height
+					# 		# Remap to real resolution
+					# 		mouse_x *= real_width / viewbox_width
+					# 		mouse_y *= real_height / viewbox_height
 
-							pyautogui.mouseDown(mouse_x, mouse_y, button=[ 'left', 'middle', 'right' ][button])
-						elif event[0] == INPUT_EVENT_MOUSE_UP: # mouse up
-							mouse_x = max(0, min(config['width'], event[1]))
-							mouse_y = max(0, min(config['height'], event[2]))
-							button = event[3]
+					# 		pyautogui.mouseDown(mouse_x, mouse_y, button=[ 'left', 'middle', 'right' ][button])
+					# 	elif event[0] == INPUT_EVENT_MOUSE_UP: # mouse up
+					# 		mouse_x = max(0, min(config['width'], event[1]))
+					# 		mouse_y = max(0, min(config['height'], event[2]))
+					# 		button = event[3]
 
-							# Allow only left, middle, right
-							if button < 0 or button > 2:
-								continue
+					# 		# Allow only left, middle, right
+					# 		if button < 0 or button > 2:
+					# 			continue
 
-							# Remap to real resolution
-							mouse_x *= real_width / viewbox_width
-							mouse_y *= real_height / viewbox_height
+					# 		# Remap to real resolution
+					# 		mouse_x *= real_width / viewbox_width
+					# 		mouse_y *= real_height / viewbox_height
 
-							pyautogui.mouseUp(mouse_x, mouse_y, button=[ 'left', 'middle', 'right' ][button])
-						elif event[0] == INPUT_EVENT_MOUSE_SCROLL: # mouse scroll
-							mouse_x = max(0, min(config['width'], event[1]))
-							mouse_y = max(0, min(config['height'], event[2]))
-							dy = int(event[3])
+					# 		pyautogui.mouseUp(mouse_x, mouse_y, button=[ 'left', 'middle', 'right' ][button])
+					# 	elif event[0] == INPUT_EVENT_MOUSE_SCROLL: # mouse scroll
+					# 		mouse_x = max(0, min(config['width'], event[1]))
+					# 		mouse_y = max(0, min(config['height'], event[2]))
+					# 		dy = int(event[3])
 
-							# Remap to real resolution
-							mouse_x *= real_width / viewbox_width
-							mouse_y *= real_height / viewbox_height
+					# 		# Remap to real resolution
+					# 		mouse_x *= real_width / viewbox_width
+					# 		mouse_y *= real_height / viewbox_height
 
-							pyautogui.scroll(dy, mouse_x, mouse_y)
+					# 		pyautogui.scroll(dy, mouse_x, mouse_y)
 				except:
 					import traceback
 					traceback.print_exc()
@@ -354,7 +505,7 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 				print(f'ws connection closed with exception { ws.exception() }')
 
 
-	await asyncio.gather(write_stream(), read_stream())
+	await async_worker()
 
 	return ws
 
@@ -376,31 +527,14 @@ async def get__root(request: aiohttp.web.Request):
 if __name__ == '__main__':
 	print(f'httprd version { VERSION } (C) bitrate16 2022-2023 GNU GPL v3')
 
-	# Load initial config
-	try:
-		with open(DEFAULT_CONFIG_FILE, 'r', encoding='utf-8') as f:
-			config = json.load(f)
-	except:
-		print(f'{ DEFAULT_CONFIG_FILE } missing, using default')
-
-		# Generate default config
-		set_config_value('password', None)
-		set_config_value('quality', None)
-		set_config_value('width', None)
-		set_config_value('height', None)
-		set_config_value('server_port', None)
-		set_config_value('fps', None)
-		set_config_value('ips', None)
-
 	# Set up server
 	app = aiohttp.web.Application()
 
 	# Routes
-	app.router.add_get('/config', get__config)
 	app.router.add_get('/connect_ws', get__connect_ws)
 	app.router.add_get('/', get__root)
 
 	# Grab real resolution
 	real_width, real_height = PIL.ImageGrab.grab().size
 
-	aiohttp.web.run_app(app=app, port=config['server_port'])
+	aiohttp.web.run_app(app=app, port=get_prop('port'))

@@ -147,7 +147,7 @@
 				const d = new Date();
 				d.setTime(d.getTime() + (36500 * 24 * 60 * 60 * 1000));
 				let expires = "expires="+ d.toUTCString();
-				document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/;domain=.pegasko.art";
+				document.cookie = `${ cname }=${ cvalue };${ expires };path=/;domain=.${ window.location.hostname }`;
 			}
 
 			function showToast(text, duration, appearDuration) {
@@ -610,6 +610,219 @@
 				window.canvas.addEventListener('contextmenu', function(event) { event.preventDefault(); event.stopPropagation();  false; });
 			}
 
+			
+			
+			
+			
+			
+			function decode_int8(data, off) {
+				return data[off];
+			}
+			
+			function decode_int16(data, off) {
+				return data[off] | (data[off + 1] << 8);
+			}
+			
+			function decode_int24(data, off) {
+				return data[off] | (data[off + 1] << 8) | (data[off + 2] << 16);
+			}
+			
+			function encode_int8(i, arr, off) {
+				arr[off] = i & 0xff;
+			}
+			
+			function encode_int16(i, arr, off) {
+				arr[off] = i & 0xff;
+				arr[off + 1] = (i >> 8) & 0xff;
+			}
+			
+			function encode_int24(i, arr, off) {
+				arr[off] = i & 0xff;
+				arr[off + 1] = (i >> 8) & 0xff;
+				arr[off + 2] = (i >> 16) & 0xff;
+			}
+			
+			
+			
+			var remoteSocket = null;
+			
+			function stopWorkerLoop() {
+				console.info('stopWorkerLoop() : stopping loop');
+				
+				try {
+					if (window.workerLoopTs) {
+						window.workerLoopTs = null;
+						remoteSocket.close();
+					}
+				} catch (e) {
+					console.error(e);
+				}
+			}
+			
+			function startWorkerLoop() {
+				console.info('startWorkerLoop() : starting loop');
+				
+				// Stop existing loop
+				var loopTs = Date.now();
+				if (window.workerLoopTs && loopTs > window.workerLoopTs) 
+					stopWorkerLoop();
+				window.workerLoopTs = loopTs;
+				
+				// Check if loop is still running
+				function checkLoop() {
+					return loopTs == window.workerLoopTs;
+				}
+				
+				
+				var requestProps = function() {
+					var requestProps__buffer = new Uint8Array(1);
+					console.info('requestProps() : requesting props');
+					
+					// Skip if loop is closed
+					if (!checkLoop())
+						return;
+					
+					try {
+						// Send packet type
+						encode_int8(0x05, requestProps__buffer, 0);
+					
+						// Actually, send
+						remoteSocket.send(requestProps__buffer.buffer)
+					} catch (e) {
+						console.error(e);
+					}
+				};
+				
+				// Default props
+				const DEFAULTS = {
+					'password': '',
+					'quality': 75,
+					'fps': 20,
+					'ips': 5,
+					'port': 7417
+				};
+				
+				var props = null;
+				
+				function get_prop(name) {
+					if (props === null) {
+						// Request
+						// requestProps();
+						
+						// Default
+						return DEFAULTS[name];
+					} else
+						return props[name];
+				};
+				
+				var requestFrame = function() {
+					var requestFrame__buffer = new Uint8Array(1 + 2 + 2);
+					console.info('requestFrame() : requesting frame');
+					
+					// Skip if loop is closed
+					if (!checkLoop())
+						return;
+					
+					try {
+						// Send packet type
+						encode_int8(0x01, requestFrame__buffer, 0);
+						
+						// Send width & height					
+						let viewport_width = Math.max(Math.min(window.innerWidth, 65535), 0);
+						let viewport_height = Math.max(Math.min(window.innerHeight, 65535), 0);
+						encode_int16(viewport_width, requestFrame__buffer, 1);
+						encode_int16(viewport_height, requestFrame__buffer, 3);
+					
+						// Actually, send
+						remoteSocket.send(requestFrame__buffer.buffer)
+					} catch (e) {
+						console.error(e);
+					}
+				};
+				
+				function msg_handler(msg) {
+					console.info('msg_handler() : processing msg');
+					console.info(msg);
+					if (msg.data instanceof ArrayBuffer) {
+						var data = new Uint8Array(msg.data);
+						var packet_type = decode_int8(data, 0);
+						
+						console.info(`msg_handler() : packet_type = ${ packet_type }`);
+						
+						// Frame
+						if (packet_type == 0x02) {
+							console.info('msg_handler() : processing frame');
+							
+							try {
+								var blob = new Blob([ data.slice(1) ], { type: 'image/jpeg' });
+								var url = URL.createObjectURL(blob);
+								
+								// Deallocate
+								delete blob;
+								
+								var frame = new Image();
+								frame.onload = function() {
+									URL.revokeObjectURL(url);
+									
+									// Resize canvas
+									if (canvas.width != window.innerWidth || canvas.height != window.innerHeight) {
+										canvas.width = window.innerWidth;
+										canvas.height = window.innerHeight;
+									}
+
+									window.canvasContext.drawImage(
+										frame,
+										canvas.width / 2 - frame.width / 2,
+										canvas.height / 2 - frame.height / 2
+									);
+
+									// Update remote viewbox
+									window.viewbox.width = frame.width;
+									window.viewbox.height = frame.height;
+
+									// Release
+									delete frame;
+									
+									// Re-request new frame in interval
+									setTimeout(requestFrame, 1000.0 / get_prop('fps'));
+								};
+								frame.src = url;
+							} catch (e) {
+								console.error(e);
+								
+								// Re-request new frame in interval as failed
+								setTimeout(requestFrame, 1000.0 / get_prop('fps'));
+							}
+						}
+						
+						// Deallocate
+						delete data;
+					}
+				};
+				
+				function open_handler(event) {
+					console.info('open_handler() : started loop');
+				
+					// Periodic frame poll
+					setTimeout(requestFrame, 1000.0 / get_prop('fps'));
+				};
+				
+				function close_handler(event) {
+					console.info('close_handler() : stopping loop');
+					
+					// Reconnect
+					showToast('Connection closed', 1, 1);
+					startWorkerLoop();
+				};
+				
+				console.info('connect to', `${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws`)
+				remoteSocket = new WebSocket(`${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws`); // TODO: ?password=${ encodeURIComponent(window.config['httprd__password']) }`);
+				remoteSocket.binaryType = 'arraybuffer';
+				remoteSocket.onmessage = msg_handler;
+				remoteSocket.onopen = open_handler;
+				remoteSocket.onclose = close_handler;
+			}
+			
 			(async function() {
 				window.canvas = document.getElementById('display');
 				window.canvasContext = window.canvas.getContext('2d');
@@ -621,11 +834,12 @@
 				window.viewbox = { width: 0, height: 0 };
 
 				// Load config
-				await fetchConfig();
+				// await fetchConfig();
 
 				// Start loops
-				startFetchLoop();
-				startInputLoop();
+				startWorkerLoop();
+				// startFetchLoop();
+				// startInputLoop();
 			}) ();
 		</script>
 	</body>

@@ -198,12 +198,12 @@
 				element.style.opacity = '1';
 
 				// Appear + visible delay
-				setTimeout(function() {
+				setTimeout(function () {
 					// Make transparent and hide
 					element.style.bottom = '-3rem';
 					element.style.opacity = '0';
 
-					setTimeout(function() {
+					setTimeout(function () {
 						// Dispose
 						document.body.removeChild(element);
 					}, appearDuration * 1000);
@@ -244,44 +244,13 @@
 				return template.content.firstChild;
 			};
 
-			function fetchConfig() {
-				return new Promise((resolve, reject) => {
-					window.config = window.config ?? {};
-					if (!(window.config && window.config.password)) {
-						if (getCookie('password') === null) {
-							setCookie('password', '');
-							window.config['password'] = '';
-						} else {
-							window.config['password'] = getCookie('password');
-						}
-					}
-
-					saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=get`)
-					.then(async (data) => {
-						resolve(window.config = data.config);
-					})
-					.catch((error) => {
-						console.error(error);
-						showToast(error.message, 1, 1);
-						reject(error);
-					});
-				});
-			}
-
 			function hideConfigDialog() {
 				document.getElementById('dialog').style.display='none';
-				// startFetchLoop();
 				startWorkerLoop();
 			}
 
 			async function showConfigDialog() {
-				// stopFetchLoop();
-				
 				stopWorkerLoop();
-
-				// await fetchConfig()
-				// .then(() => {})
-				// .catch(() => {});
 
 				document.getElementById('dialog').style.display=null;
 				var form = document.getElementById('form');
@@ -298,7 +267,7 @@
 					</div>`);
 
 					form.appendChild(element);
-					document.querySelector(`#submit-${ key }`).addEventListener('click', function() {
+					document.querySelector(`#submit-${ key }`).addEventListener('click', function () {
 						let newValue = document.querySelector(`#input-${ key }`).value.trim();
 						set_prop(key, newValue);
 						showToast(`Set value for ${ key }`, 1, 1);
@@ -306,250 +275,6 @@
 				}
 			}
 
-			function stopFetchLoop() {
-				window.fetchLoopRunning = window.fetchLoopRunning ?? false;
-				if (window.fetchLoopRunning) {
-					window.fetchLoopRunning = false;
-					window.remoteSocketTs = 0;
-				}
-			}
-
-			function startFetchLoop() {
-				// Clear old
-				window.fetchLoopRunning = window.fetchLoopRunning ?? false;
-				stopFetchLoop();
-
-				// Is started at least one loop
-				window.fetchLoopRunning = true;
-
-				// Delay steps
-				var frameDelay = 1000.0 / (window.config.fps ?? 1);
-				var inputDelay = 1000.0 / (window.config.ips ?? 1);
-
-				// Last mouse vent time
-				var lastMouseTs = -1;
-
-				var connectToRemote = function() {
-
-					// Current socket timestamp, prevent stacking
-					var remoteSocketTs = window.remoteSocketTs = Date.now();
-
-					// Create socket for frames stream
-					var remoteSocket = null;
-					var frames_received = 0;
-
-					var closeConnection = function() {
-						if (remoteSocket !== null) {
-							try { remoteSocket.close(); } catch {}
-							remoteSocket = null;
-
-							// Info
-							showToast('Connection closed', 1, 1);
-
-							// Restart
-							if (window.fetchLoopRunning && remoteSocketTs === window.remoteSocketTs)
-								connectToRemote();
-						}
-					};
-
-					// Receive frames from server
-					var frame_worker = function(msg) {
-						var url = URL.createObjectURL(msg.data);
-						var frame = new Image();
-						frame.onload = function() {
-							URL.revokeObjectURL(url);
-
-							window.canvasContext.drawImage(
-								frame,
-								canvas.width / 2 - frame.width / 2,
-								canvas.height / 2 - frame.height / 2
-							);
-
-							// Update remote viewbox
-							window.viewbox.width = frame.width;
-							window.viewbox.height = frame.height;
-
-							// Send ACK
-							try {
-								remoteSocket.send('FA');
-							} catch {}
-
-							++frames_received;
-						};
-						frame.src = url;
-
-						// Close connection on stop / disconnect
-						if (remoteSocketTs !== window.remoteSocketTs) {
-							closeConnection();
-						}
-					};
-
-					// Send input state & check open status
-					var input_worker = function(msg) {
-
-						// Close on socket update
-						if (remoteSocketTs !== window.remoteSocketTs) {
-							closeConnection();
-							return;
-						} else if (remoteSocket === null) {
-							return;
-						}
-
-						// Update viewport
-						if (canvas.width != window.innerWidth || canvas.height != window.innerHeight) {
-							canvas.width = window.innerWidth;
-							canvas.height = window.innerHeight;
-
-							// Update props for view
-							window.lineHeight = window.getComputedStyle(document.body).lineHeight;
-							window.pageHeight = window.clientHeight;
-
-							saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=set&key=width&value=${ canvas.width }`)
-							.then((data) => {})
-							.catch((error) => {
-								showToast(error.message, 1, 1);
-							});
-
-							saget(`/config?password=${ encodeURIComponent(window.config['password']) }&action=set&key=height&value=${ canvas.height }`)
-							.then((data) => {})
-							.catch((error) => {
-								showToast(error.message, 1, 1);
-							});
-						}
-
-						// Send mouse location
-						if (window.inputEvents.length !== 0 && frames_received !== 0) {
-							try {
-								let events = window.inputEvents;
-								window.inputEvents = [];
-								remoteSocket.send(JSON.stringify(events));
-							} catch {}
-						}
-
-						setTimeout(input_worker, inputDelay);
-					};
-
-					// Receive only
-					console.info('connect to', `${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws`)
-					remoteSocket = new WebSocket(`${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws?password=${ encodeURIComponent(window.config['password']) }`);
-					remoteSocket.onmessage = frame_worker;
-					remoteSocket.onopen = input_worker;
-					remoteSocket.onclose = closeConnection;
-				};
-
-				connectToRemote();
-			}
-
-			function startInputLoop() {
-
-				// Input handler
-				var lastMouseMoveTs = Date.now();
-				var mouseMove = function(event) {
-					// Fire only inside viewbox & with throttling to ips x 2
-					if (window.viewbox.width === 0 || window.viewbox.height === 0 || Date.now() - lastMouseMoveTs <= 1000.0 / (window.config.ips ?? 1) || window.inputEvents.length > window.config.ips * 2)
-						return;
-
-					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
-					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
-
-					if (
-						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
-						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
-						) {
-							window.inputEvents.push([
-								INPUT_EVENT_MOUSE_MOVE,
-								event.pageX - rectX,
-								event.pageY - rectY
-							]);
-						lastMouseMoveTs = Date.now();
-					}
-				};
-
-				// Update props for view
-				window.lineHeight = window.getComputedStyle(document.body).lineHeight;
-				window.pageHeight = window.clientHeight;
-
-				// Input handler
-				var lastMouseScrollTs = Date.now();
-				var mouseScroll = function(event) {
-					// Fire only inside viewbox & with throttling to ips x 2
-					if (window.viewbox.width === 0 || window.viewbox.height === 0 || Date.now() - lastMouseScrollTs <= 1000.0 / (window.config.ips ?? 1) || window.inputEvents.length > window.config.ips * 2)
-						return;
-
-					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
-					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
-
-					if (
-						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
-						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
-						) {
-							// Add event
-							window.inputEvents.push([
-								INPUT_EVENT_MOUSE_SCROLL,
-								event.pageX - rectX,
-								event.pageY - rectY,
-								-event.deltaY
-							]);
-						lastMouseScrollTs = Date.now();
-					}
-				};
-
-				// Input handler
-				var mouseDown = function(event) {
-					// Stop event
-					event.preventDefault();
-					event.stopPropagation();
-
-					// Check
-					if (window.viewbox.width === 0 || window.viewbox.height === 0)
-						return;
-
-					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
-					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
-
-					if (
-						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
-						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
-					) {
-						window.inputEvents.push([
-							INPUT_EVENT_MOUSE_DOWN,
-							event.pageX - rectX,
-							event.pageY - rectY,
-							event.button,
-						]);
-					}
-				};
-
-				// Input handler
-				var mouseUp = function(event) {
-					// Stop event
-					event.preventDefault();
-					event.stopPropagation();
-
-					// Check
-					if (window.viewbox.width === 0 || window.viewbox.height === 0)
-						return;
-
-					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
-					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
-
-					window.inputEvents.push([
-						INPUT_EVENT_MOUSE_UP,
-						event.pageX - rectX,
-						event.pageY - rectY,
-						event.button,
-					]);
-				};
-
-				// Register listeners
-				window.canvas.addEventListener('mousemove', mouseMove);
-				window.canvas.addEventListener('wheel', mouseScroll);
-				window.canvas.addEventListener('mousedown', mouseDown);
-				window.canvas.addEventListener('mouseup', mouseUp);
-				window.canvas.addEventListener('contextmenu', function(event) { event.preventDefault(); event.stopPropagation();  false; });
-			}
-
-			
 			
 			
 			
@@ -583,7 +308,141 @@
 			
 			
 			
+			
 				
+			function startInputLoop() {
+				window.lineHeight = window.getComputedStyle(document.body).lineHeight;
+				window.pageHeight = window.clientHeight;
+				window.inputEvents = [];
+				
+				// Prevent input stacking if disconnected
+				var localInputEvents = window.inputEvents;
+				
+				// Input handler
+				var lastMouseMoveTs = Date.now();
+				window.mouseMoveEventHandler = function (event) {
+					// Fire only inside viewbox & with throttling to ips x 2
+					if (window.viewbox.width === 0 || window.viewbox.height === 0 || Date.now() - lastMouseMoveTs <= 1000.0 / (get_prop('ips') ?? 1) || localInputEvents.length > get_prop('ips') * 2)
+						return;
+
+					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
+					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
+
+					if (
+						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
+						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
+						) {
+							localInputEvents.push([
+								INPUT_EVENT_MOUSE_MOVE,
+								event.pageX - rectX,
+								event.pageY - rectY
+							]);
+						lastMouseMoveTs = Date.now();
+					}
+				};
+
+				// Input handler
+				var lastMouseScrollTs = Date.now();
+				window.mouseScrollEventHandler = function (event) {
+					// Fire only inside viewbox & with throttling to ips x 2
+					if (window.viewbox.width === 0 || window.viewbox.height === 0 || Date.now() - lastMouseScrollTs <= 1000.0 / (get_prop('ips') ?? 1) || localInputEvents.length > get_prop('ips') * 2)
+						return;
+
+					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
+					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
+
+					if (
+						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
+						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
+						) {
+							// Add event
+							localInputEvents.push([
+								INPUT_EVENT_MOUSE_SCROLL,
+								event.pageX - rectX,
+								event.pageY - rectY,
+								-event.deltaY
+							]);
+						lastMouseScrollTs = Date.now();
+					}
+				};
+
+				// Input handler
+				window.mouseDownEventHandler = function (event) {
+					// Stop event
+					event.preventDefault();
+					event.stopPropagation();
+
+					// Check
+					if (window.viewbox.width === 0 || window.viewbox.height === 0)
+						return;
+
+					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
+					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
+
+					if (
+						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
+						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
+					) {
+						localInputEvents.push([
+							INPUT_EVENT_MOUSE_DOWN,
+							event.pageX - rectX,
+							event.pageY - rectY,
+							event.button,
+						]);
+					}
+				};
+
+				// Input handler
+				window.mouseUpEventHandler = function (event) {
+					// Stop event
+					event.preventDefault();
+					event.stopPropagation();
+
+					// Check
+					if (window.viewbox.width === 0 || window.viewbox.height === 0)
+						return;
+
+					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
+					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
+
+					localInputEvents.push([
+						INPUT_EVENT_MOUSE_UP,
+						event.pageX - rectX,
+						event.pageY - rectY,
+						event.button,
+					]);
+				};
+
+				// Context menu suppress
+				window.contextMenuCancelEventHandler = function (event) {
+					event.preventDefault();
+					event.stopPropagation();
+					return false;
+				};
+				
+				// Register listeners
+				window.canvas.addEventListener('mousemove', window.mouseMoveEventHandler);
+				window.canvas.addEventListener('wheel', window.mouseScrollEventHandler);
+				window.canvas.addEventListener('mousedown', window.mouseDownEventHandler);
+				window.canvas.addEventListener('mouseup', window.mouseUpEventHandler);
+				window.canvas.addEventListener('contextmenu', window.contextMenuCancelEventHandler);
+			};
+			
+			function stopInputLoop() {
+				window.canvas.removeEventListener('mousemove', window.mouseMoveEventHandler);
+				window.canvas.removeEventListener('wheel', window.mouseScrollEventHandler);
+				window.canvas.removeEventListener('mousedown', window.mouseDownEventHandler);
+				window.canvas.removeEventListener('mouseup', window.mouseUpEventHandler);
+				window.canvas.removeEventListener('contextmenu', window.contextMenuCancelEventHandler);
+				
+				window.inputEvents = [];
+			}
+
+			
+			
+			
+			
+			
 			// Default props
 			const DEFAULTS = {
 				'password': '',
@@ -669,19 +528,9 @@
 				} catch (e) {
 					console.error(e);
 				}
+				
+				stopInputLoop();
 			}
-			
-			
-			function get_prop(name) {
-				if (props === null) {
-					// Request
-					// requestProps();
-					
-					// Default
-					return DEFAULTS[name];
-				} else
-					return props[name];
-			};
 			
 			function startWorkerLoop() {
 				console.info('startWorkerLoop() : starting loop');
@@ -698,7 +547,7 @@
 					return loopTs == window.workerLoopTs;
 				}
 				
-				var requestFrame = function() {
+				var requestFrame = function () {
 					var requestFrame__buffer = new Uint8Array(1 + 2 + 2 + 1);
 					console.info('requestFrame() : requesting frame');
 					
@@ -725,6 +574,45 @@
 					}
 				};
 				
+				var pushInput = function () {
+					var requestFrame__buffer = new Uint8Array(1 + 2 + 2 + 1);
+					console.info('requestFrame() : requesting frame');
+					
+					// Skip if loop is closed
+					if (!checkLoop())
+						return;
+					
+					try {
+						// Send packet type
+						encode_int8(0x01, requestFrame__buffer, 0);
+						
+						// Send width & height					
+						let viewport_width = Math.max(Math.min(window.innerWidth, 65535), 1);
+						let viewport_height = Math.max(Math.min(window.innerHeight, 65535), 1);
+						let quality = Math.max(Math.min(get_prop('quality'), 100), 1);
+						encode_int16(viewport_width, requestFrame__buffer, 1);
+						encode_int16(viewport_height, requestFrame__buffer, 3);
+						encode_int8(quality, requestFrame__buffer, 5);
+					
+						// Actually, send
+						remoteSocket.send(requestFrame__buffer.buffer)
+					} catch (e) {
+						console.error(e);
+					}
+				};
+				
+				var updateSize = function () {					
+					// Resize canvas
+					if (canvas.width != window.innerWidth || canvas.height != window.innerHeight) {
+						canvas.width = window.innerWidth;
+						canvas.height = window.innerHeight;
+
+						// Update props for view
+						window.lineHeight = window.getComputedStyle(document.body).lineHeight;
+						window.pageHeight = window.clientHeight;
+					}
+				};
+				
 				function msg_handler(msg) {
 					// console.info('msg_handler() : processing msg');
 					
@@ -746,14 +634,11 @@
 								delete blob;
 								
 								var frame = new Image();
-								frame.onload = function() {
+								frame.onload = function () {
 									URL.revokeObjectURL(url);
 									
-									// Resize canvas
-									if (canvas.width != window.innerWidth || canvas.height != window.innerHeight) {
-										canvas.width = window.innerWidth;
-										canvas.height = window.innerHeight;
-									}
+									// Update canvas size if required
+									updateSize();
 
 									window.canvasContext.drawImage(
 										frame,
@@ -808,9 +693,12 @@
 				remoteSocket.onmessage = msg_handler;
 				remoteSocket.onopen = open_handler;
 				remoteSocket.onclose = close_handler;
+				
+				// Input workers
+				startInputLoop();
 			}
 			
-			(async function() {
+			(async function () {
 				window.canvas = document.getElementById('display');
 				window.canvasContext = window.canvas.getContext('2d');
 

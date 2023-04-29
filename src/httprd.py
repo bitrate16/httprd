@@ -69,156 +69,30 @@ def log_request(request: aiohttp.web.Request):
 	now = now.strftime("%d.%m.%Y-%H:%M:%S")
 	print(f'[{ now }] { request.remote } { request.method } { request.path_qs }')
 
-def get_config_default(key: str):
-	"""
-	Get default value for the given key
-	"""
 
-	if key == 'password':
-		return DEFAULT_PASSWORD
-	elif key == 'quality':
-		return DEFAULT_QUALITY
-	elif key == 'width':
-		return DEFAULT_WIDTH
-	elif key == 'height':
-		return DEFAULT_HEIGHT
-	elif key == 'server_port':
-		return DEFAULT_SERVER_PORT
-	elif key == 'fps':
-		return DEFAULT_FPS
-	elif key == 'ips':
-		return DEFAULT_IPS
-	else:
-		raise ValueError('invalid key')
+def decode_int8(data):
+	return int.from_bytes(data[0:1], 'little')
 
-def set_config_value(key: str, value):
-	"""
-	Set value for the given key with respect to None (and invalid value) as default value
-	"""
+def decode_int16(data):
+	return int.from_bytes(data[0:2], 'little')
 
-	if key == 'password':
-		if value is None or value == '':
-			config[key] = get_config_default(key)
-		else:
-			config[key] = value
-	elif key == 'quality':
-		try:
-			config[key] = max(1, min(100, int(value)))
-		except:
-			config[key] = get_config_default(key)
-	elif key == 'server_port':
-		try:
-			config[key] = max(1, min(65535, int(value)))
-		except:
-			config[key] = get_config_default(key)
-	elif key == 'fps':
-		try:
-			config[key] = max(1, min(60, int(value)))
-		except:
-			config[key] = get_config_default(key)
-	elif key == 'ips':
-		try:
-			config[key] = max(1, min(60, int(value)))
-		except:
-			config[key] = get_config_default(key)
-	elif key == 'width':
-		try:
-			config[key] = max(MIN_VIEWPORT_DIM, min(MAX_VIEWPORT_DIM, int(value)))
-		except:
-			config[key] = get_config_default(key)
-	elif key == 'height':
-		try:
-			config[key] = max(MIN_VIEWPORT_DIM, min(MAX_VIEWPORT_DIM, int(value)))
-		except:
-			config[key] = get_config_default(key)
-	else:
-		raise ValueError('invalid key')
+def decode_int24(data):
+	return int.from_bytes(data[0:3], 'little')
 
-	with open(DEFAULT_CONFIG_FILE, 'w', encoding='utf-8') as f:
-		json.dump(config, f)
+def encode_int8(i):
+	return int.to_bytes(i, 1, 'little')
 
+def encode_int16(i):
+	return int.to_bytes(i, 2, 'little')
 
-def capture_screen_buffer(buffer: BytesIO) -> typing.Tuple[BytesIO, int]:
-	"""
-	Capture current screen state and reprocess based on current config
-	"""
+def encode_int24(i):
+	return int.to_bytes(i, 3, 'little')
 
-	image = PIL.ImageGrab.grab()
+def dump_bytes_dec(data):
+	for i in range(len(data)):
+		print(data[i], end=' ')
+	print()
 
-	# Update real dimensions
-	global real_width, real_height
-	real_width, real_height = image.size
-
-	if image.width > config['width'] or image.height > config['height']:
-		image.thumbnail((config['width'], config['height']), DOWNSAMPLE)
-
-	# Update viewbox dimensions
-	global viewbox_width, viewbox_height
-	viewbox_width, viewbox_height = image.size
-
-	image.save(fp=buffer, format='JPEG', quality=config['quality'])
-	buflen = buffer.tell()
-	buffer.seek(0)
-	return buflen
-
-
-async def get__config(request: aiohttp.web.Request) -> aiohttp.web.StreamResponse:
-	"""
-	Configuration endpoint, requires password for each request. If password is
-	not set, all requests are accepted. If password does not match, rejects
-	request.
-
-	query:
-		action:
-			set: (Can be used to update config properties and reset them to defaults with None)
-				key: str
-				value: str
-			get:
-				key: str
-			keys
-		password: str
-	"""
-
-	log_request(request)
-
-	# Check access
-	query__password = config.get('password', DEFAULT_PASSWORD)
-	if query__password != DEFAULT_PASSWORD and query__password != request.query.get('password', None):
-		return aiohttp.web.json_response({
-			'status': 'error',
-			'message': 'invalid password'
-		})
-
-	# Route on action
-	query__action = request.query.get('action', None)
-	if query__action == 'get':
-		return aiohttp.web.json_response({
-			'status': 'result',
-			'config': config
-		})
-	elif query__action == 'set':
-		query__key = request.query.get('key', None)
-		if query__key not in config:
-			return aiohttp.web.json_response({
-				'status': 'error',
-				'message': 'key does not exist'
-			})
-		query__value = request.query.get('value', None)
-		set_config_value(query__key, query__value)
-		return aiohttp.web.json_response({
-			'status': 'result',
-			'value': config.get(query__key, None)
-		})
-	elif query__action == 'keys':
-		return aiohttp.web.json_response({
-			'status': 'result',
-			'keys': list(config.keys())
-		})
-	else:
-		return aiohttp.web.json_response({
-			'status': 'error',
-			'message': 'invalid action'
-		})
 
 async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamResponse:
 	"""
@@ -238,67 +112,6 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 	# Frame buffer
 	buffer = BytesIO()
 
-	# Write stream
-	async def write_stream():
-
-		# last frame timestamp to track receive or timeout for resend
-		last_frame_sent = 0
-
-		# Write frames at desired framerate
-		while not ws.closed:
-
-			# Throttle & wait for next frame reception
-			if last_frame_ack >= last_frame_sent or (time.time() - last_frame_sent) > 10.0 / config['fps']:
-				# Grab frame
-				image = PIL.ImageGrab.grab()
-
-				# Update real dimensions
-				global real_width, real_height
-				real_width, real_height = image.size
-
-				if image.width > config['width'] or image.height > config['height']:
-					image.thumbnail((config['width'], config['height']), DOWNSAMPLE)
-
-				# Update viewbox dimensions
-				global viewbox_width, viewbox_height
-				viewbox_width, viewbox_height = image.size
-
-				image.save(fp=buffer, format='JPEG', quality=config['quality'])
-				buflen = buffer.tell()
-				mbytes = buffer.read(buflen)
-				buffer.seek(0)
-
-				t = time.time()
-				await ws.send_bytes(mbytes)
-				last_frame_sent = time.time()
-
-				# Wait next frame
-				await asyncio.sleep(1.0 / config['fps'] - (last_frame_sent - t))
-			else:
-				await asyncio.sleep(0.5 / config['fps'])
-
-	def decode_int8(data):
-		return int.from_bytes(data[0:1], 'little')
-
-	def decode_int16(data):
-		return int.from_bytes(data[0:2], 'little')
-	
-	def decode_int24(data):
-		return int.from_bytes(data[0:3], 'little')
-
-	def encode_int8(i):
-		return int.to_bytes(i, 1, 'little')
-
-	def encode_int16(i):
-		return int.to_bytes(i, 2, 'little')
-	
-	def encode_int24(i):
-		return int.to_bytes(i, 3, 'little')
-
-	def dump_bytes_dec(data):
-		for i in range(len(data)):
-			print(data[i], end=' ')
-		print()
 
 	# Read stream
 	async def async_worker():

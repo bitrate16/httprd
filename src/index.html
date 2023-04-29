@@ -130,11 +130,6 @@
 		<div id="config" onclick="showConfigDialog();">⚙</div>
 		<script type="text/javascript" async>
 
-			const INPUT_EVENT_MOUSE_MOVE   = 0;
-			const INPUT_EVENT_MOUSE_DOWN   = 1;
-			const INPUT_EVENT_MOUSE_UP     = 2;
-			const INPUT_EVENT_MOUSE_SCROLL = 3;
-
 			function getCookie(name) {
 				const value = `; ${document.cookie}`;
 				const parts = value.split(`; ${name}=`);
@@ -151,7 +146,8 @@
 			}
 
 			function showToast(text, duration, appearDuration) {
-				console.error(text)
+				console.info(text);
+
 				if (duration <= 0)
 					throw new Error('Invalid value for duration');
 
@@ -210,33 +206,6 @@
 				}, appearDuration * 1000 + duration * 1000);
 			}
 
-			function saget(url) {
-				return new Promise((resolve, reject) => {
-					fetch(url)
-					.then((response) => {
-						if (response.status != 200) {
-							reject({
-								'status': 'error',
-								'message': response.statusText
-							});
-							return;
-						} else
-							return response.json();
-					})
-					.then((data) => {
-						if (data === undefined)
-							reject({ status: 'error', message: 'empty response' });
-						else if (data['status'] != 'result')
-							reject(data);
-						else
-							resolve(data);
-					})
-					.catch((error) => {
-						reject(error);
-					})
-				});
-			};
-
 			function htmlToElement(html) {
 				var template = document.createElement('template');
 				html = html.trim();
@@ -275,188 +244,434 @@
 				}
 			}
 
-			
-			
-			
-			
+
+
+
+
 			function decode_int8(data, off) {
 				return data[off];
 			}
-			
+
 			function decode_int16(data, off) {
 				return data[off] | (data[off + 1] << 8);
 			}
-			
+
 			function decode_int24(data, off) {
 				return data[off] | (data[off + 1] << 8) | (data[off + 2] << 16);
 			}
-			
+
 			function encode_int8(i, arr, off) {
 				arr[off] = i & 0xff;
 			}
-			
+
 			function encode_int16(i, arr, off) {
 				arr[off] = i & 0xff;
 				arr[off + 1] = (i >> 8) & 0xff;
 			}
-			
+
 			function encode_int24(i, arr, off) {
 				arr[off] = i & 0xff;
 				arr[off + 1] = (i >> 8) & 0xff;
 				arr[off + 2] = (i >> 16) & 0xff;
 			}
-			
-			
-			
-			
-				
+
+
+
+			// Local app state
+			var app = {};
+
 			function startInputLoop() {
-				window.lineHeight = window.getComputedStyle(document.body).lineHeight;
-				window.pageHeight = window.clientHeight;
-				window.inputEvents = [];
-				
-				// Prevent input stacking if disconnected
-				var localInputEvents = window.inputEvents;
-				
+
+				// Input event types
+				const INPUT_EVENT_MOUSE_MOVE   = 0;
+				const INPUT_EVENT_MOUSE_DOWN   = 1;
+				const INPUT_EVENT_MOUSE_UP     = 2;
+				const INPUT_EVENT_MOUSE_SCROLL = 3;
+				const INPUT_EVENT_KEY_DOWN     = 4;
+				const INPUT_EVENT_KEY_UP       = 5;
+
+				// console.info('startInputLoop() : starting input loop');
+
+				// Map JS kkode to pyautogui
+				const jsToPyKeys = {
+					"Quote": "'",
+					"Plus": "+",
+					"Comma": ",",
+					"Minus": "-",
+					"Period": ".",
+					"Slash": "/",
+					"Digit0": "0",
+					"Digit1": "1",
+					"Digit2": "2",
+					"Digit3": "3",
+					"Digit4": "4",
+					"Digit5": "5",
+					"Digit6": "6",
+					"Digit7": "7",
+					"Digit8": "8",
+					"Digit9": "9",
+					"Semicolon": ";",
+					"Equal": "=",
+					"BracketLeft": "[",
+					"Backslash": "\\",
+					"BracketRight": "]",
+					"Backquote": "`",
+					"KeyA": "a",
+					"KeyB": "b",
+					"KeyC": "c",
+					"KeyD": "d",
+					"KeyE": "e",
+					"KeyF": "f",
+					"KeyG": "g",
+					"KeyH": "h",
+					"KeyI": "i",
+					"KeyJ": "j",
+					"KeyK": "k",
+					"KeyL": "l",
+					"KeyM": "m",
+					"KeyN": "n",
+					"KeyO": "o",
+					"KeyP": "p",
+					"KeyQ": "q",
+					"KeyR": "r",
+					"KeyS": "s",
+					"KeyT": "t",
+					"KeyU": "u",
+					"KeyV": "v",
+					"KeyW": "w",
+					"KeyX": "x",
+					"KeyY": "y",
+					"KeyZ": "z",
+					"NumpadAdd": "add",
+					"AltLeft": "altleft",
+					"AltRight": "altright",
+					"Backspace": "backspace",
+					"BrowserBack": "browserback",
+					"BrowserFavourites": "browserfavorites",
+					"BrowserForward": "browserforward",
+					"BrowserHome": "browserhome",
+					"BrowserRefresh": "browserrefresh",
+					"BrowserSearch": "browsersearch",
+					"BrowserStop": "browserstop",
+					"CapsLock": "capslock",
+					"Convert": "convert",
+					"ControlLeft": "ctrlleft",
+					"ControlRight": "ctrlright",
+					"NumpadDecimal": "decimal",
+					"Delete": "delete",
+					"NumpadDivide": "divide",
+					"ArrowDown": "down",
+					"End": "end",
+					"Enter": "enter",
+					"Escape": "escape",
+					"F1": "f1",
+					"F2": "f2",
+					"F3": "f3",
+					"F4": "f4",
+					"F5": "f5",
+					"F6": "f6",
+					"F7": "f7",
+					"F8": "f8",
+					"F9": "f9",
+					"F10": "f10",
+					"F11": "f11",
+					"F12": "f12",
+					"F13": "f13",
+					"F14": "f14",
+					"F15": "f15",
+					"F16": "f16",
+					"F17": "f17",
+					"F18": "f18",
+					"F19": "f19",
+					"F20": "f20",
+					"F21": "f21",
+					"F22": "f22",
+					"F23": "f23",
+					"F24": "f24",
+					"Fn": "fn",
+					"Help": "help",
+					"Home": "home",
+					"Insert": "insert",
+					"KanaMode": "kana",
+					"LaunchApp1": "launchapp1",
+					"LaunchApp2": "launchapp2",
+					"LaunchMail": "launchmail",
+					"MediaSelect": "launchmediaselect",
+					"ArrowLeft": "left",
+					"NumpadMultiply": "multiply",
+					"MediaTrackNext": "nexttrack",
+					"NonConvert": "nonconvert",
+					"Numpad0": "num0",
+					"Numpad1": "num1",
+					"Numpad2": "num2",
+					"Numpad3": "num3",
+					"Numpad4": "num4",
+					"Numpad5": "num5",
+					"Numpad6": "num6",
+					"Numpad7": "num7",
+					"Numpad8": "num8",
+					"Numpad9": "num9",
+					"NumLock": "numlock",
+					"PageDown": "pagedown",
+					"PageUp": "pageup",
+					"Pause": "pause",
+					"MediaPlayPause": "playpause",
+					"MediaTrackPrevious": "prevtrack",
+					"Print": "print",
+					"PrintScreen": "printscreen",
+					"ArrowRight": "right",
+					"ScrollLock": "scrolllock",
+					"Select": "select",
+					"ShiftLeft": "shiftleft",
+					"ShiftRight": "shiftright",
+					"Sleep": "sleep",
+					"Space": "space",
+					"MediaStop": "stop",
+					"NumpadSubtract": "subtract",
+					"Tab": "tab",
+					"ArrowUp": "up",
+					"AudioVolumeDown": "volumedown",
+					"VolumeDown": "volumedown",
+					"AudioVolumeMute": "volumemute",
+					"AudioVolumeUp": "volumeup",
+					"VolumeUp": "volumeup",
+					"OSLeft": "winleft",
+					"MetaLeft": "winleft",
+					"OSRight": "winright",
+					"MetaRight": "winright",
+					"IntlYen": "yen",
+					"AltLeft": "optionleft",
+					"AltLeft": "optionright",
+				};
+
+				app.inputEvents = [];
+				app.remote = { width: 0, height: 0 };
+
 				// Input handler
 				var lastMouseMoveTs = Date.now();
-				window.mouseMoveEventHandler = function (event) {
+				app.mouseMoveEventHandler = function (event) {
 					// Fire only inside viewbox & with throttling to ips x 2
-					if (window.viewbox.width === 0 || window.viewbox.height === 0 || Date.now() - lastMouseMoveTs <= 1000.0 / (get_prop('ips') ?? 1) || localInputEvents.length > get_prop('ips') * 2)
-						return;
+					if (
+						app.viewport.width === 0 ||
+						app.viewport.height === 0 ||
+						Date.now() - lastMouseMoveTs <= 1000.0 / (get_prop('ips') ?? 1) ||
+						app.inputEvents.length > get_prop('ips') * 2
+					) return;
 
-					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
-					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
+					let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
+					let rectY = (app.canvas.clientHeight / 2) - (app.viewport.height / 2);
 
 					if (
-						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
-						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
-						) {
-							localInputEvents.push([
-								INPUT_EVENT_MOUSE_MOVE,
-								event.pageX - rectX,
-								event.pageY - rectY
-							]);
+						event.pageX >= rectX && event.pageX <= rectX + app.viewport.width &&
+						event.pageY >= rectY && event.pageY <= rectY + app.viewport.height
+					) {
+						let realX = Math.round((event.pageX - rectX) * app.remote.width / app.viewport.width);
+						let realY = Math.round((event.pageY - rectY) * app.remote.height / app.viewport.height);
+
+						app.inputEvents.push([
+							INPUT_EVENT_MOUSE_MOVE,
+							realX,
+							realY
+						]);
+
 						lastMouseMoveTs = Date.now();
 					}
 				};
 
 				// Input handler
 				var lastMouseScrollTs = Date.now();
-				window.mouseScrollEventHandler = function (event) {
+				app.mouseScrollEventHandler = function (event) {
 					// Fire only inside viewbox & with throttling to ips x 2
-					if (window.viewbox.width === 0 || window.viewbox.height === 0 || Date.now() - lastMouseScrollTs <= 1000.0 / (get_prop('ips') ?? 1) || localInputEvents.length > get_prop('ips') * 2)
-						return;
+					if (
+						app.viewport.width === 0 ||
+						app.viewport.height === 0 ||
+						Date.now() - lastMouseScrollTs <= 1000.0 / (get_prop('ips') ?? 1) ||
+						app.inputEvents.length > get_prop('ips') * 2
+					) return;
 
-					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
-					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
+					let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
+					let rectY = (app.canvas.clientHeight / 2) - (app.viewport.height / 2);
 
 					if (
-						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
-						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
-						) {
-							// Add event
-							localInputEvents.push([
-								INPUT_EVENT_MOUSE_SCROLL,
-								event.pageX - rectX,
-								event.pageY - rectY,
-								-event.deltaY
-							]);
+						event.pageX >= rectX && event.pageX <= rectX + app.viewport.width &&
+						event.pageY >= rectY && event.pageY <= rectY + app.viewport.height
+					) {
+						let realX = Math.round((event.pageX - rectX) * app.remote.width / app.viewport.width);
+						let realY = Math.round((event.pageY - rectY) * app.remote.height / app.viewport.height);
+
+						app.inputEvents.push([
+							INPUT_EVENT_MOUSE_SCROLL,
+							realX,
+							realY,
+							-event.deltaY
+						]);
+
 						lastMouseScrollTs = Date.now();
 					}
 				};
 
 				// Input handler
-				window.mouseDownEventHandler = function (event) {
+				app.mouseDownEventHandler = function (event) {
 					// Stop event
 					event.preventDefault();
 					event.stopPropagation();
 
 					// Check
-					if (window.viewbox.width === 0 || window.viewbox.height === 0)
+					if (app.remote.width === 0 || app.remote.height === 0)
 						return;
 
-					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
-					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
+					let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
+					let rectY = (app.canvas.clientHeight / 2) - (app.viewport.height / 2);
 
 					if (
-						event.pageX >= rectX && event.pageX <= rectX + window.viewbox.width &&
-						event.pageY >= rectY && event.pageY <= rectY + window.viewbox.height
+						event.pageX >= rectX && event.pageX <= rectX + app.viewport.width &&
+						event.pageY >= rectY && event.pageY <= rectY + app.viewport.height
 					) {
-						localInputEvents.push([
+						let realX = Math.round((event.pageX - rectX) * app.remote.width / app.viewport.width);
+						let realY = Math.round((event.pageY - rectY) * app.remote.height / app.viewport.height);
+
+						app.inputEvents.push([
 							INPUT_EVENT_MOUSE_DOWN,
-							event.pageX - rectX,
-							event.pageY - rectY,
+							realX,
+							realY,
 							event.button,
 						]);
 					}
 				};
 
 				// Input handler
-				window.mouseUpEventHandler = function (event) {
+				app.mouseUpEventHandler = function (event) {
 					// Stop event
 					event.preventDefault();
 					event.stopPropagation();
 
 					// Check
-					if (window.viewbox.width === 0 || window.viewbox.height === 0)
+					if (app.remote.width === 0 || app.remote.height === 0)
 						return;
 
-					let rectX = (window.canvas.clientWidth / 2) - (window.viewbox.width / 2);
-					let rectY = (window.canvas.clientHeight / 2) - (window.viewbox.height / 2);
+					let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
+					let rectY = (app.canvas.clientHeight / 2) - (app.viewport.height / 2);
 
-					localInputEvents.push([
+					let realX = Math.round((event.pageX - rectX) * app.remote.width / app.viewport.width);
+					let realY = Math.round((event.pageY - rectY) * app.remote.height / app.viewport.height);
+
+					app.inputEvents.push([
 						INPUT_EVENT_MOUSE_UP,
-						event.pageX - rectX,
-						event.pageY - rectY,
+						realX,
+						realY,
 						event.button,
 					]);
 				};
 
 				// Context menu suppress
-				window.contextMenuCancelEventHandler = function (event) {
+				app.contextMenuCancelEventHandler = function (event) {
 					event.preventDefault();
 					event.stopPropagation();
 					return false;
 				};
-				
+
+				// Keys Input handler
+				var lastKeyDownTs = Date.now();
+				app.keyDownEventHandler = function (event) {
+					event.preventDefault();
+					event.stopPropagation();
+
+					// Prevent repetitive events spamming
+					if (
+						event.repeat && (
+							Date.now() - lastKeyDownTs <= 1000.0 / (get_prop('ips') ?? 1) ||
+							app.inputEvents.length > get_prop('ips') * 2
+						)
+					) return;
+
+					// console.log(event.key);
+					console.log(event.code);
+
+					if (event.code in jsToPyKeys) {
+						app.inputEvents.push([
+							INPUT_EVENT_KEY_DOWN,
+							jsToPyKeys[event.code],
+							// event.ctrlKey,
+							// event.altKey,
+							// event.shiftKey,
+							// event.metaKey
+						]);
+
+						lastMouseScrollTs = Date.now();
+					}
+
+					return false;
+				};
+
+				// Keys Input handler
+				app.keyUpEventHandler = function (event) {
+					event.preventDefault();
+					event.stopPropagation();
+
+					// console.log(event.key);
+					console.log(event.code);
+
+					if (event.code in jsToPyKeys) {
+						app.inputEvents.push([
+							INPUT_EVENT_KEY_UP,
+							jsToPyKeys[event.code],
+							// event.ctrlKey,
+							// event.altKey,
+							// event.shiftKey,
+							// event.metaKey
+						]);
+
+						lastMouseScrollTs = Date.now();
+					}
+
+					return false;
+				};
+
 				// Register listeners
-				window.canvas.addEventListener('mousemove', window.mouseMoveEventHandler);
-				window.canvas.addEventListener('wheel', window.mouseScrollEventHandler);
-				window.canvas.addEventListener('mousedown', window.mouseDownEventHandler);
-				window.canvas.addEventListener('mouseup', window.mouseUpEventHandler);
-				window.canvas.addEventListener('contextmenu', window.contextMenuCancelEventHandler);
+				app.canvas.addEventListener('mousemove', app.mouseMoveEventHandler);
+				app.canvas.addEventListener('wheel', app.mouseScrollEventHandler);
+				app.canvas.addEventListener('mousedown', app.mouseDownEventHandler);
+				app.canvas.addEventListener('mouseup', app.mouseUpEventHandler);
+				app.canvas.addEventListener('contextmenu', app.contextMenuCancelEventHandler);
+
+				document.addEventListener('keydown', app.keyDownEventHandler);
+				document.addEventListener('keyup', app.keyUpEventHandler);
 			};
-			
+
 			function stopInputLoop() {
-				window.canvas.removeEventListener('mousemove', window.mouseMoveEventHandler);
-				window.canvas.removeEventListener('wheel', window.mouseScrollEventHandler);
-				window.canvas.removeEventListener('mousedown', window.mouseDownEventHandler);
-				window.canvas.removeEventListener('mouseup', window.mouseUpEventHandler);
-				window.canvas.removeEventListener('contextmenu', window.contextMenuCancelEventHandler);
-				
-				window.inputEvents = [];
+				// console.info('stopInputLoop() : stopping input loop');
+
+				app.canvas.removeEventListener('mousemove', app.mouseMoveEventHandler);
+				app.canvas.removeEventListener('wheel', app.mouseScrollEventHandler);
+				app.canvas.removeEventListener('mousedown', app.mouseDownEventHandler);
+				app.canvas.removeEventListener('mouseup', app.mouseUpEventHandler);
+				app.canvas.removeEventListener('contextmenu', app.contextMenuCancelEventHandler);
+
+				document.removeEventListener('keydown', app.keyDownEventHandler);
+				document.removeEventListener('keyup', app.keyUpEventHandler);
+
+				app.inputEvents = [];
 			}
 
-			
-			
-			
-			
-			
+
+
+
+
+
 			// Default props
-			const DEFAULTS = {
+			const DEFAULT_PROPS = {
 				'password': '',
 				'quality': 75,
 				'fps': 20,
 				'ips': 5
 			};
-			
+
 			var props = null;
-			
+
 			// Init default or stored props values
 			function init_props() {
-				props = { ...DEFAULTS };
-				
+				props = { ...DEFAULT_PROPS };
+
 				try {
 					var localProps = JSON.parse(localStorage.getItem('httprd-props'));
 					for (const [key, _] of Object.entries(props)) {
@@ -466,15 +681,15 @@
 					}
 				} catch {}
 			};
-			
+
 			function get_prop(name) {
 				return props[name];
 			};
-			
+
 			function get_props() {
 				return props;
 			}
-			
+
 			function set_prop(name, value) {
 				if (name === 'password') {
 					value = value.trim();
@@ -484,7 +699,7 @@
 					} catch (e) {
 						throw new Error('quality must be in range [1, 100]');
 					}
-					
+
 					if (value < 1 || value > 100)
 						throw new Error('quality must be in range [1, 100]');
 				} else if (name === 'fps') {
@@ -493,7 +708,7 @@
 					} catch (e) {
 						throw new Error('fps must be in range [1, inf]');
 					}
-					
+
 					if (value < 1)
 						throw new Error('fps must be in range [1]');
 				} else if (name === 'ips') {
@@ -502,219 +717,239 @@
 					} catch (e) {
 						throw new Error('ips must be in range [1, inf]');
 					}
-					
+
 					if (value < 1)
 						throw new Error('ips must be in range [1]');
 				}
-				
+
 				props[name] = value;
 				localStorage.setItem('httprd-props', JSON.stringify(props));
 			};
-			
-			
-			var remoteSocket = null;
-			window.workerLoopRunning = false;
-			
+
+
+			app.remoteSocket = null;
+			app.workerLoopRunning = false;
+
 			function stopWorkerLoop() {
-				console.info('stopWorkerLoop() : stopping loop');
-				
-				window.workerLoopRunning = false;
-				
+				// console.info('stopWorkerLoop() : stopping loop');
+
+				app.workerLoopRunning = false;
+
 				try {
-					if (window.workerLoopTs) {
-						window.workerLoopTs = null;
-						remoteSocket.close();
+					if (app.workerLoopTs) {
+						app.workerLoopTs = null;
+						app.remoteSocket.close();
 					}
 				} catch (e) {
 					console.error(e);
 				}
-				
+
 				stopInputLoop();
 			}
-			
+
 			function startWorkerLoop() {
-				console.info('startWorkerLoop() : starting loop');
-				
+				// console.info('startWorkerLoop() : starting loop');
+
 				// Stop existing loop
 				var loopTs = Date.now();
-				if (window.workerLoopTs && loopTs > window.workerLoopTs) 
+				if (app.workerLoopTs && loopTs > app.workerLoopTs)
 					stopWorkerLoop();
-				window.workerLoopTs = loopTs;
-				window.workerLoopRunning = true;
-				
+				app.workerLoopTs = loopTs;
+				app.workerLoopRunning = true;
+
+				// Clear dimensions of desktop
+				app.remote = { width: 0, height: 0 };
+				app.viewport = { width: 0, height: 0 };
+
 				// Check if loop is still running
 				function checkLoop() {
-					return loopTs == window.workerLoopTs;
+					return loopTs == app.workerLoopTs;
 				}
-				
+
 				var requestFrame = function () {
 					var requestFrame__buffer = new Uint8Array(1 + 2 + 2 + 1);
-					console.info('requestFrame() : requesting frame');
-					
+					// console.info('requestFrame() : requesting frame');
+
 					// Skip if loop is closed
 					if (!checkLoop())
 						return;
-					
+
 					try {
 						// Send packet type
 						encode_int8(0x01, requestFrame__buffer, 0);
-						
-						// Send width & height					
+
+						// Send width & height
 						let viewport_width = Math.max(Math.min(window.innerWidth, 65535), 1);
 						let viewport_height = Math.max(Math.min(window.innerHeight, 65535), 1);
 						let quality = Math.max(Math.min(get_prop('quality'), 100), 1);
 						encode_int16(viewport_width, requestFrame__buffer, 1);
 						encode_int16(viewport_height, requestFrame__buffer, 3);
 						encode_int8(quality, requestFrame__buffer, 5);
-					
+
 						// Actually, send
-						remoteSocket.send(requestFrame__buffer.buffer)
+						app.remoteSocket.send(requestFrame__buffer.buffer);
 					} catch (e) {
 						console.error(e);
 					}
+
+					delete requestFrame__buffer;
 				};
-				
+
 				var pushInput = function () {
-					var requestFrame__buffer = new Uint8Array(1 + 2 + 2 + 1);
-					console.info('requestFrame() : requesting frame');
-					
+					// console.info('pushInput() : pushing input data');
+
 					// Skip if loop is closed
 					if (!checkLoop())
 						return;
-					
+
 					try {
-						// Send packet type
-						encode_int8(0x01, requestFrame__buffer, 0);
-						
-						// Send width & height					
-						let viewport_width = Math.max(Math.min(window.innerWidth, 65535), 1);
-						let viewport_height = Math.max(Math.min(window.innerHeight, 65535), 1);
-						let quality = Math.max(Math.min(get_prop('quality'), 100), 1);
-						encode_int16(viewport_width, requestFrame__buffer, 1);
-						encode_int16(viewport_height, requestFrame__buffer, 3);
-						encode_int8(quality, requestFrame__buffer, 5);
-					
-						// Actually, send
-						remoteSocket.send(requestFrame__buffer.buffer)
+						if (app.inputEvents.length) {
+							var inputEvents = app.inputEvents;
+							app.inputEvents = [];
+							// console.info(`pushInput() : pushing ${ inputEvents.length } events`);
+
+							// console.log(inputEvents);
+
+							var serialized = JSON.stringify(inputEvents);
+							var requestInput__buffer = new Uint8Array(1 + serialized.length);
+
+							// Send packet type
+							encode_int8(0x03, requestInput__buffer, 0);
+
+							// Send data
+							for (let ind = 0; ind < serialized.length; ++ind)
+								requestInput__buffer[ind + 1] = serialized.charCodeAt(ind);
+
+							// Actually, send
+							app.remoteSocket.send(requestInput__buffer.buffer);
+
+							delete requestInput__buffer;
+						}
 					} catch (e) {
 						console.error(e);
 					}
+
+					setTimeout(pushInput, 1000.0 / get_prop('ips'));
 				};
-				
-				var updateSize = function () {					
+
+				var updateSize = function () {
 					// Resize canvas
-					if (canvas.width != window.innerWidth || canvas.height != window.innerHeight) {
-						canvas.width = window.innerWidth;
-						canvas.height = window.innerHeight;
+					if (app.canvas.width != window.innerWidth || app.canvas.height != window.innerHeight) {
+						app.canvas.width = window.innerWidth;
+						app.canvas.height = window.innerHeight;
 
 						// Update props for view
-						window.lineHeight = window.getComputedStyle(document.body).lineHeight;
-						window.pageHeight = window.clientHeight;
+						app.lineHeight = window.getComputedStyle(document.body).lineHeight;
+						app.pageHeight = window.clientHeight;
 					}
 				};
-				
+
 				function msg_handler(msg) {
 					// console.info('msg_handler() : processing msg');
-					
+
 					if (msg.data instanceof ArrayBuffer) {
 						var data = new Uint8Array(msg.data);
 						var packet_type = decode_int8(data, 0);
-						
-						console.info(`msg_handler() : packet_type = ${ packet_type }`);
-						
+
+						// console.info(`msg_handler() : packet_type = ${ packet_type }`);
+
 						// Frame
 						if (packet_type == 0x02) {
 							// console.info('msg_handler() : processing frame');
-							
+
 							try {
-								var blob = new Blob([ data.slice(1) ], { type: 'image/jpeg' });
+								// Update remote desktop properties
+								app.remote.width = decode_int16(data, 1);
+								app.remote.height = decode_int16(data, 3);
+
+								// Get frame blob
+								var blob = new Blob([ data.slice(5) ], { type: 'image/jpeg' });
 								var url = URL.createObjectURL(blob);
-								
+
 								// Deallocate
 								delete blob;
-								
+
 								var frame = new Image();
 								frame.onload = function () {
 									URL.revokeObjectURL(url);
-									
+
 									// Update canvas size if required
 									updateSize();
 
-									window.canvasContext.drawImage(
+									app.canvasContext.drawImage(
 										frame,
-										canvas.width / 2 - frame.width / 2,
-										canvas.height / 2 - frame.height / 2
+										app.canvas.width / 2 - frame.width / 2,
+										app.canvas.height / 2 - frame.height / 2
 									);
 
-									// Update remote viewbox
-									window.viewbox.width = frame.width;
-									window.viewbox.height = frame.height;
+									// Received frame size
+									app.viewport.width = frame.width;
+									app.viewport.height = frame.height;
 
 									// Release
 									delete frame;
-									
+
 									// Re-request new frame in interval
 									setTimeout(requestFrame, 1000.0 / get_prop('fps'));
 								};
 								frame.src = url;
 							} catch (e) {
 								console.error(e);
-								
+
 								// Re-request new frame in interval as failed
 								setTimeout(requestFrame, 1000.0 / get_prop('fps'));
 							}
 						}
-						
+
 						// Deallocate
 						delete data;
 					}
 				};
-				
+
 				function open_handler(event) {
-					console.info('open_handler() : started loop');
-				
+					// console.info('open_handler() : started loop');
+
+					// Compute size dims
+					updateSize();
+
+					// Input workers
+					startInputLoop();
+
 					// Periodic frame poll
 					setTimeout(requestFrame, 1000.0 / get_prop('fps'));
+
+					// Start input pusher
+					setTimeout(pushInput, 1000.0 / get_prop('ips'));
 				};
-				
+
 				function close_handler(event) {
-					console.info('close_handler() : stopping loop');
-					
+					// console.info('close_handler() : stopping loop');
+
 					// Reconnect if loop was not terminated externally
-					if (window.workerLoopRunning) {
+					if (app.workerLoopRunning) {
 						showToast('Connection closed', 1, 1);
 						startWorkerLoop();
 					}
 				};
-				
+
+				// Connect socket
 				console.info('connect to', `${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws`)
-				remoteSocket = new WebSocket(`${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws?password=${ encodeURIComponent(get_prop('password')) }`);
-				remoteSocket.binaryType = 'arraybuffer';
-				remoteSocket.onmessage = msg_handler;
-				remoteSocket.onopen = open_handler;
-				remoteSocket.onclose = close_handler;
-				
-				// Input workers
-				startInputLoop();
+				app.remoteSocket = new WebSocket(`${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws?password=${ encodeURIComponent(get_prop('password')) }`);
+				app.remoteSocket.binaryType = 'arraybuffer';
+				app.remoteSocket.onmessage = msg_handler;
+				app.remoteSocket.onopen = open_handler;
+				app.remoteSocket.onclose = close_handler;
 			}
-			
+
 			(async function () {
-				window.canvas = document.getElementById('display');
-				window.canvasContext = window.canvas.getContext('2d');
-
-				// Input events buffer
-				window.inputEvents = [];
-
-				// Viewbox size
-				window.viewbox = { width: 0, height: 0 };
+				app.canvas = document.getElementById('display');
+				app.canvasContext = app.canvas.getContext('2d');
 
 				// Init config
 				init_props()
-				
+
 				// Start loops
 				startWorkerLoop();
-				// startFetchLoop();
-				// startInputLoop();
 			}) ();
 		</script>
 	</body>

@@ -107,118 +107,126 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 	# Frame buffer
 	buffer = BytesIO()
 
+	# Track pressed key state for future reset on disconnect
+	state_keys = {}
+
+	def release_keys():
+		for k in state_keys.keys():
+			if state_keys[k]:
+				pyautogui.keyUp(k)
+
+	def update_key_state(key, state):
+		state_keys[key] = state
 
 	# Read stream
 	async def async_worker():
 
-		# Write frames at desired framerate
-		async for msg in ws:
-			# Receive input data
-			if msg.type == aiohttp.WSMsgType.BINARY:
-				try:
+		try:
+			# Write frames at desired framerate
+			async for msg in ws:
+				# Receive input data
+				if msg.type == aiohttp.WSMsgType.BINARY:
+					try:
 
-					# Drop on invalid packet
-					if len(msg.data) == 0:
-						continue
+						# Drop on invalid packet
+						if len(msg.data) == 0:
+							continue
 
-					# print()
-					# print('bytes')
-					# dump_bytes_dec(msg.data)
+						# Parse params
+						packet_type = decode_int8(msg.data[0:1])
+						payload = msg.data[1:]
 
-					# Parse params
-					packet_type = decode_int8(msg.data[0:1])
-					payload = msg.data[1:]
+						# Frame request
+						if packet_type == 0x01:
+							viewport_width = decode_int16(payload[0:2])
+							viewport_height = decode_int16(payload[2:4])
+							quality = decode_int8(payload[4:5])
 
-					# Frame request
-					if packet_type == 0x01:
-						viewport_width = decode_int16(payload[0:2])
-						viewport_height = decode_int16(payload[2:4])
-						quality = decode_int8(payload[4:5])
+							# Grab frame
+							image = PIL.ImageGrab.grab()
 
-						# print('packet_type = ', packet_type)
-						# print('viewport_width = ', viewport_width)
-						# print('viewport_height = ', viewport_height)
-						# print('quality = ', quality)
+							# Real dimensions
+							real_width, real_height = image.width, image.height
 
-						# Grab frame
-						image = PIL.ImageGrab.grab()
+							# Resize
+							if image.width > viewport_width or image.height > viewport_height:
+								image.thumbnail((viewport_width, viewport_height), DOWNSAMPLE)
 
-						# Real dimensions
-						real_width, real_height = image.width, image.height
+							# Write header: frame response
+							buffer.seek(0)
+							buffer.write(encode_int8(0x02))
+							buffer.write(encode_int16(real_width))
+							buffer.write(encode_int16(real_height))
 
-						# Resize
-						if image.width > viewport_width or image.height > viewport_height:
-							image.thumbnail((viewport_width, viewport_height), DOWNSAMPLE)
+							# Write body
+							image.save(fp=buffer, format='JPEG', quality=quality)
+							buflen = buffer.tell()
+							buffer.seek(0)
+							mbytes = buffer.read(buflen)
 
-						# Write header: frame response
-						buffer.seek(0)
-						buffer.write(encode_int8(0x02))
-						buffer.write(encode_int16(real_width))
-						buffer.write(encode_int16(real_height))
+							await ws.send_bytes(mbytes)
 
-						# Write body
-						image.save(fp=buffer, format='JPEG', quality=quality)
-						buflen = buffer.tell()
-						buffer.seek(0)
-						mbytes = buffer.read(buflen)
+						# Input request
+						if packet_type == 0x03:
+							# Unpack events data
+							data = json.loads(bytes.decode(payload, encoding='ascii'))
 
-						await ws.send_bytes(mbytes)
+							# Iterate events
+							for event in data:
+								if event[0] == INPUT_EVENT_MOUSE_MOVE: # mouse position
+									mouse_x = max(0, min(real_width, event[1]))
+									mouse_y = max(0, min(real_height, event[2]))
 
-					# Input request
-					if packet_type == 0x03:
-						# Unpack events data
-						data = json.loads(bytes.decode(payload, encoding='ascii'))
+									pyautogui.moveTo(mouse_x, mouse_y)
+								elif event[0] == INPUT_EVENT_MOUSE_DOWN: # mouse down
+									mouse_x = max(0, min(real_width, event[1]))
+									mouse_y = max(0, min(real_height, event[2]))
+									button = event[3]
 
-						print('packet_type = ', packet_type)
-						print('data = ', data)
+									# Allow only left, middle, right
+									if button < 0 or button > 2:
+										continue
 
-						# Iterate events
-						for event in data:
-							if event[0] == INPUT_EVENT_MOUSE_MOVE: # mouse position
-								mouse_x = max(0, min(real_width, event[1]))
-								mouse_y = max(0, min(real_height, event[2]))
+									pyautogui.mouseDown(mouse_x, mouse_y, button=[ 'left', 'middle', 'right' ][button])
+								elif event[0] == INPUT_EVENT_MOUSE_UP: # mouse up
+									mouse_x = max(0, min(real_width, event[1]))
+									mouse_y = max(0, min(real_height, event[2]))
+									button = event[3]
 
-								pyautogui.moveTo(mouse_x, mouse_y)
-							elif event[0] == INPUT_EVENT_MOUSE_DOWN: # mouse down
-								mouse_x = max(0, min(real_width, event[1]))
-								mouse_y = max(0, min(real_height, event[2]))
-								button = event[3]
+									# Allow only left, middle, right
+									if button < 0 or button > 2:
+										continue
 
-								# Allow only left, middle, right
-								if button < 0 or button > 2:
-									continue
+									pyautogui.mouseUp(mouse_x, mouse_y, button=[ 'left', 'middle', 'right' ][button])
+								elif event[0] == INPUT_EVENT_MOUSE_SCROLL: # mouse scroll
+									mouse_x = max(0, min(real_width, event[1]))
+									mouse_y = max(0, min(real_height, event[2]))
+									dy = int(event[3])
 
-								pyautogui.mouseDown(mouse_x, mouse_y, button=[ 'left', 'middle', 'right' ][button])
-							elif event[0] == INPUT_EVENT_MOUSE_UP: # mouse up
-								mouse_x = max(0, min(real_width, event[1]))
-								mouse_y = max(0, min(real_height, event[2]))
-								button = event[3]
+									pyautogui.scroll(dy, mouse_x, mouse_y)
+								elif event[0] == INPUT_EVENT_KEY_DOWN: # keypress
+									keycode = event[1]
 
-								# Allow only left, middle, right
-								if button < 0 or button > 2:
-									continue
+									pyautogui.keyDown(keycode)
+									update_key_state(keycode, True)
+								elif event[0] == INPUT_EVENT_KEY_UP: # keypress
+									keycode = event[1]
 
-								pyautogui.mouseUp(mouse_x, mouse_y, button=[ 'left', 'middle', 'right' ][button])
-							elif event[0] == INPUT_EVENT_MOUSE_SCROLL: # mouse scroll
-								mouse_x = max(0, min(real_width, event[1]))
-								mouse_y = max(0, min(real_height, event[2]))
-								dy = int(event[3])
-
-								pyautogui.scroll(dy, mouse_x, mouse_y)
-							elif event[0] == INPUT_EVENT_KEY_DOWN: # keypress
-								keycode = event[1]
-
-								print(keycode)
-
-								pyautogui.keyDown(keycode)
-				except:
-					import traceback
-					traceback.print_exc()
-			elif msg.type == aiohttp.WSMsgType.ERROR:
-				print(f'ws connection closed with exception { ws.exception() }')
-
+									pyautogui.keyUp(keycode)
+									update_key_state(keycode, False)
+					except:
+						import traceback
+						traceback.print_exc()
+				elif msg.type == aiohttp.WSMsgType.ERROR:
+					print(f'ws connection closed with exception { ws.exception() }')
+		except:
+			import traceback
+			traceback.print_exc()
 
 	await async_worker()
+
+	# Release stuck keys
+	release_keys()
 
 	return ws
 

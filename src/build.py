@@ -1,6 +1,8 @@
 # Build two files into one
 
 import base64
+import gzip
+
 
 def replace_template(src: str, template_name: str, new_text: str):
 	"""
@@ -29,15 +31,14 @@ with open('httprd.py', 'r', encoding='utf-8') as f:
 	httprd = f.read()
 
 
-import json
 page = page.replace('\t', '')
 page = page.replace('\n\n', '\n')
 page = page.replace('\n\n', '\n')
 page = page.replace('\n\n', '\n')
 page = page.replace('\n\n', '\n')
-page = base64.b85encode(page.encode('utf-8')).decode()
+page = base64.b85encode(gzip.compress(page.encode('utf-8'))).decode()
 
-httprd = replace_template(httprd, 'INDEX_CONTENT', f'''INDEX_CONTENT = base64.b85decode('{ page }'.encode()).decode('utf-8')''')
+httprd = replace_template(httprd, 'INDEX_CONTENT', f'''INDEX_CONTENT = gzip.decompress(base64.b85decode('{ page }'.encode())).decode('utf-8')''')
 httprd = replace_template(httprd, 'get__root', f'''return aiohttp.web.Response(body=INDEX_CONTENT, content_type='text/html', status=200, charset='utf-8')''')
 
 

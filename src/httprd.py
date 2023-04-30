@@ -21,6 +21,7 @@ import aiohttp
 import aiohttp.web
 import argparse
 import base64
+import gzip
 import PIL
 import PIL.Image
 import PIL.ImageGrab

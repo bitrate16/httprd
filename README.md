@@ -15,6 +15,13 @@ Single-script remote desktop with web access, password & settings
 Run `$ python httprd.py` & Connect to `127.0.0.1:7417`
 
 # Usage
+
+```
+$ pip install -r requirements.txt
+$ python httprd.py --port 12345 --password=qwerty --view_password=ytrewq
+```
+
+Arguments:
 ```
 > python .\httprd.py -h
 usage: httprd.py [-h] [--port {1..65535}] [--password PASSWORD] [--view_password VIEW_PASSWORD] [--fullscreen]

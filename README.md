@@ -6,7 +6,7 @@ Single-script remote desktop with web access, password & settings
 # Features
 * Single-script
 * Configurable framerate, Input per second, resolution, JPEG quality
-* Mouse input
+* Mouse & Keyboard input
 * Websocket connection for less overhead
 
 # Download

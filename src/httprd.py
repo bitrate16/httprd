@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-VERSION = '3.1'
+VERSION = '3.2'
 
 import json
 import aiohttp

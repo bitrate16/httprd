@@ -467,6 +467,7 @@
 
 					app.inputEvents = [];
 					app.remote = { width: 0, height: 0 };
+					app.lastInputTs = Date.now();
 
 					// Input handler
 					var lastMouseMoveTs = Date.now();
@@ -475,8 +476,7 @@
 						if (
 							app.viewport.width === 0 ||
 							app.viewport.height === 0 ||
-							Date.now() - lastMouseMoveTs <= 1000.0 / (get_prop('ips') ?? 1) ||
-							app.inputEvents.length > get_prop('ips') * 2
+							app.lastInputTs <= lastMouseMoveTs
 						) return;
 
 						let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
@@ -505,9 +505,7 @@
 						// Fire only inside viewbox & with throttling to ips x 2
 						if (
 							app.viewport.width === 0 ||
-							app.viewport.height === 0 ||
-							Date.now() - lastMouseScrollTs <= 1000.0 / (get_prop('ips') ?? 1) ||
-							app.inputEvents.length > get_prop('ips') * 2
+							app.viewport.height === 0
 						) return;
 
 						let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
@@ -843,6 +841,7 @@
 
 								// Actually, send
 								app.remoteSocket.send(requestInput__buffer.buffer);
+								app.lastInputTs = Date.now();
 
 								delete requestInput__buffer;
 							}

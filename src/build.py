@@ -32,10 +32,16 @@ with open('httprd.py', 'r', encoding='utf-8') as f:
 
 
 page = page.replace('\t', '')
-page = page.replace('\n\n', '\n')
-page = page.replace('\n\n', '\n')
-page = page.replace('\n\n', '\n')
-page = page.replace('\n\n', '\n')
+lines = []
+for l in page.split('\n'):
+	l = l.strip()
+	if len(l) == 0:
+		continue
+	if l.startswith('//'):
+		continue
+	lines.append(l)
+page = '\n'.join(lines)
+
 page = base64.b85encode(gzip.compress(page.encode('utf-8'))).decode()
 
 httprd = replace_template(httprd, 'INDEX_CONTENT', f'''INDEX_CONTENT = gzip.decompress(base64.b85decode('{ page }'.encode())).decode('utf-8')''')

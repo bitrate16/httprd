@@ -598,21 +598,18 @@
 						ShiftLeftPressed = ShiftLeftPressed || event.code === 'ShiftLeft';
 						ShiftRightPressed = ShiftRightPressed || event.code === 'ShiftRight';
 
-						// Prevent repetitive events spamming
-						if (
-							event.repeat && (
-								Date.now() - lastKeyDownTs <= 1000.0 / (get_prop('ips') ?? 1) ||
-								app.inputEvents.length > get_prop('ips') * 2
-							)
-						) return;
+						var key = jsToPyKeys[event.code];
+						
+						// Prevent sending repeating key twice if key is in current queue
+						for (let i = 0; i < app.inputEvents.length; ++i)
+							if (app.inputEvents[i][0] == INPUT_EVENT_KEY_DOWN && app.inputEvents[i][1] === key)
+								return;
 
 						if (event.code in jsToPyKeys) {
 							app.inputEvents.push([
 								INPUT_EVENT_KEY_DOWN,
-								jsToPyKeys[event.code]
+								key
 							]);
-
-							lastMouseScrollTs = Date.now();
 						}
 
 						return false;
@@ -622,6 +619,13 @@
 					app.keyUpEventHandler = function (event) {
 						event.preventDefault();
 						event.stopPropagation();
+						
+						var key = jsToPyKeys[event.code];
+						
+						// Prevent sending repeating key twice if key is in current queue
+						for (let i = 0; i < app.inputEvents.length; ++i)
+							if (app.inputEvents[i][0] == INPUT_EVENT_KEY_UP && app.inputEvents[i][1] === key)
+								return;
 
 						if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
 							if (ShiftLeftPressed) {
@@ -638,15 +642,11 @@
 								]);
 							}
 
-							lastMouseScrollTs = Date.now();
-
 						} else if (event.code in jsToPyKeys) {
 							app.inputEvents.push([
 								INPUT_EVENT_KEY_UP,
-								jsToPyKeys[event.code]
+								key
 							]);
-
-							lastMouseScrollTs = Date.now();
 						}
 
 						return false;

@@ -14,12 +14,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-VERSION = '3.2'
+VERSION = '3.3'
 
 import json
 import aiohttp
 import aiohttp.web
 import argparse
+import mss
 import base64
 import gzip
 import PIL
@@ -36,7 +37,7 @@ except ImportError:
     from io import BytesIO
 
 # Const config
-DOWNSAMPLE = PIL.Image.BILINEAR
+DOWNSAMPLE = PIL.Image.NEAREST
 # Minimal amount of partial frames to be sent before sending full repaint frame to avoid fallback to full repaint on long delay channels
 MIN_PARTIAL_FRAMES_BEFORE_FULL_REPAINT = 60
 # Minimal amount of empty frames to be sent before sending full repaint frame to avoid fallback to full repaint on long delay channels
@@ -146,7 +147,7 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 		viewport_height = 0
 
 		try:
-
+			
 			# Write frames at desired framerate
 			async for msg in ws:
 
@@ -169,10 +170,34 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 							quality = decode_int8(payload[4:5])
 
 							# Grab frame
-							if args.fullscreen:
-								image = PIL.ImageGrab.grab(bbox=None, include_layered_windows=False, all_screens=True)
-							else:
-								image = PIL.ImageGrab.grab()
+							with mss.mss() as sct:
+								# Can not screenshot
+								if len(sct.monitors) == 0:
+									buffer.write(encode_int8(0x00))
+									
+									buflen = buffer.tell()
+									buffer.seek(0)
+									mbytes = buffer.read(buflen)
+
+									await ws.send_bytes(mbytes)
+								
+								# Can screenshot
+								if args.fullscreen:
+									l, t = sct.monitors[0][:2]
+									r, b = sct.monitors[0][2:]
+									
+									for m in sct.monitors:
+										l = m[0] if l is None or l > m[0] else l
+										t = m[1] if t is None or t > m[1] else t
+										r = m[2] if r is None or r > m[2] else r
+										b = m[3] if b is None or b > m[3] else b
+									
+									dims = [ l, t, r, b ]
+								else:
+									dims = sct.monitors[args.display % len(sct.monitors)]
+								
+								sct_img = sct.grab(dims)
+								image = PIL.Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
 
 							# Real dimensions
 							real_width, real_height = image.width, image.height
@@ -233,7 +258,7 @@ async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamRes
 
 						# Input request
 						if packet_type == 0x03:
-
+								
 							# Skip non-control access
 							if not has_control_access:
 								continue
@@ -325,12 +350,20 @@ async def get__root(request: aiohttp.web.Request):
 
 
 if __name__ == '__main__':
+	# Validator
+	def check_positive(value):
+		ivalue = int(value)
+		if ivalue < 0:
+			raise argparse.ArgumentTypeError(f'{ ivalue } should be positive int')
+		return ivalue
+	
 	# Args
 	parser = argparse.ArgumentParser(description='Process some integers.')
 	parser.add_argument('--port', type=int, default=7417, metavar='{1..65535}', choices=range(1, 65535), help='server port')
 	parser.add_argument('--password', type=str, default=None, help='password for remote control session')
 	parser.add_argument('--view_password', type=str, default=None, help='password for view only session (can only be set if --password is set)')
 	parser.add_argument('--fullscreen', action='store_true', default=False, help='enable multi-display screen capture')
+	parser.add_argument('--display', type=check_positive, default=0, help='display id for streaming')
 	args = parser.parse_args()
 
 	# Post-process args

@@ -14,13 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-VERSION = '3.3'
+VERSION = '4.1'
 
 import json
 import aiohttp
 import aiohttp.web
 import argparse
-import mss
 import base64
 import gzip
 import PIL
@@ -28,6 +27,7 @@ import PIL.Image
 import PIL.ImageGrab
 import PIL.ImageChops
 import pyautogui
+import traceback
 
 from datetime import datetime
 
@@ -37,7 +37,7 @@ except ImportError:
     from io import BytesIO
 
 # Const config
-DOWNSAMPLE = PIL.Image.NEAREST
+DOWNSAMPLE = PIL.Image.BILINEAR
 # Minimal amount of partial frames to be sent before sending full repaint frame to avoid fallback to full repaint on long delay channels
 MIN_PARTIAL_FRAMES_BEFORE_FULL_REPAINT = 60
 # Minimal amount of empty frames to be sent before sending full repaint frame to avoid fallback to full repaint on long delay channels
@@ -65,323 +65,345 @@ app: aiohttp.web.Application
 
 
 def decode_int8(data):
-	return int.from_bytes(data[0:1], 'little')
+    return int.from_bytes(data[0:1], 'little')
 
 def decode_int16(data):
-	return int.from_bytes(data[0:2], 'little')
+    return int.from_bytes(data[0:2], 'little')
 
 def decode_int24(data):
-	return int.from_bytes(data[0:3], 'little')
+    return int.from_bytes(data[0:3], 'little')
 
 def encode_int8(i):
-	return int.to_bytes(i, 1, 'little')
+    return int.to_bytes(i, 1, 'little')
 
 def encode_int16(i):
-	return int.to_bytes(i, 2, 'little')
+    return int.to_bytes(i, 2, 'little')
 
 def encode_int24(i):
-	return int.to_bytes(i, 3, 'little')
+    return int.to_bytes(i, 3, 'little')
 
 def dump_bytes_dec(data):
-	for i in range(len(data)):
-		print(data[i], end=' ')
-	print()
+    for i in range(len(data)):
+        print(data[i], end=' ')
+    print()
 
 
-async def get__connect_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamResponse:
-	"""
-	Capture display stream and write it as JPEG stream via Websocket, so receive input
-	"""
+async def get__connect_input_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamResponse:
+    """
+    WebSocket endpoint for input & control data stream
+    """
 
-	# Check access level
-	has_control_access = args.password == request.query.get('password', '')
-	has_view_access = args.view_password is not None and args.view_password == request.query.get('password', '')
+    # Check access
+    access = (args.password == request.query.get('password', '').strip())
 
-	if has_control_access:
-		access_level = 'CONTROL'
-	elif has_view_access:
-		access_level = 'VIEW'
-	else:
-		access_level = 'NO ACCESS'
+    # Log request
+    now = datetime.now()
+    now = now.strftime("%d.%m.%Y-%H:%M:%S")
+    print(f'[{ now }] { request.remote } { request.method } [{ "INPUT" if access else "NO ACCESS" }] { request.path_qs }')
 
-	# Log request
-	now = datetime.now()
-	now = now.strftime("%d.%m.%Y-%H:%M:%S")
-	print(f'[{ now }] { request.remote } { request.method } [{ access_level }] { request.path_qs }')
+    # Open socket
+    ws = aiohttp.web.WebSocketResponse()
+    await ws.prepare(request)
 
-	# Open socket
-	ws = aiohttp.web.WebSocketResponse()
-	await ws.prepare(request)
+    # Close with error code on no access
+    if not access:
+        await ws.close(code=4001, message=b'Unauthorized')
+        return ws
 
-	# Check access
-	if not (has_control_access or has_view_access):
-		await ws.close(code=4001, message=b'Unauthorized')
-		return ws
+    # Track pressed key state for future reset on disconnect
+    state_keys = {}
 
-	# Frame buffer
-	buffer = BytesIO()
+    def release_keys():
+        for k in state_keys.keys():
+            if state_keys[k]:
+                pyautogui.keyUp(k)
 
-	# Track pressed key state for future reset on disconnect
-	state_keys = {}
+    def update_key_state(key, state):
+        state_keys[key] = state
 
-	def release_keys():
-		for k in state_keys.keys():
-			if state_keys[k]:
-				pyautogui.keyUp(k)
+    # Read stream
+    async def async_worker():
 
-	def update_key_state(key, state):
-		state_keys[key] = state
+        try:
 
-	# Read stream
-	async def async_worker():
+            # Reply to requests
+            async for msg in ws:
 
-		# Last screen frame
-		last_frame = None
-		# Track count of partial frames send since last full repaint frame send and prevent firing full frames on low internet
-		partial_frames_since_last_full_repaint_frame = 0
-		# Track count of empty frames send since last full repaint frame send and prevent firing full frames on low internet
-		empty_frames_since_last_full_repaint_frame = 0
+                # Receive input data
+                if msg.type == aiohttp.WSMsgType.BINARY:
+                    try:
 
-		# Store remote viewport size to force-push full repaint
-		viewport_width = 0
-		viewport_height = 0
+                        # Drop on invalid packet
+                        if len(msg.data) == 0:
+                            continue
 
-		try:
-			
-			# Write frames at desired framerate
-			async for msg in ws:
+                        # Parse params
+                        packet_type = decode_int8(msg.data[0:1])
+                        payload = msg.data[1:]
 
-				# Receive input data
-				if msg.type == aiohttp.WSMsgType.BINARY:
-					try:
+                        # Input request
+                        if packet_type == 0x03:
 
-						# Drop on invalid packet
-						if len(msg.data) == 0:
-							continue
+                            # Unpack events data
+                            data = json.loads(bytes.decode(payload, encoding='ascii'))
 
-						# Parse params
-						packet_type = decode_int8(msg.data[0:1])
-						payload = msg.data[1:]
+                            # Iterate events
+                            for event in data:
+                                if event[0] == INPUT_EVENT_MOUSE_MOVE: # mouse position
+                                    mouse_x = max(0, min(real_width, event[1]))
+                                    mouse_y = max(0, min(real_height, event[2]))
 
-						# Frame request
-						if packet_type == 0x01:
-							req_viewport_width = decode_int16(payload[0:2])
-							req_viewport_height = decode_int16(payload[2:4])
-							quality = decode_int8(payload[4:5])
+                                    pyautogui.moveTo(mouse_x, mouse_y)
+                                elif event[0] == INPUT_EVENT_MOUSE_DOWN: # mouse down
+                                    mouse_x = max(0, min(real_width, event[1]))
+                                    mouse_y = max(0, min(real_height, event[2]))
+                                    button = event[3]
 
-							# Grab frame
-							with mss.mss() as sct:
-								# Can not screenshot
-								if len(sct.monitors) == 0:
-									buffer.write(encode_int8(0x00))
-									
-									buflen = buffer.tell()
-									buffer.seek(0)
-									mbytes = buffer.read(buflen)
+                                    # Allow only left, middle, right
+                                    if button < 0 or button > 2:
+                                        continue
 
-									await ws.send_bytes(mbytes)
-								
-								# Can screenshot
-								if args.fullscreen:
-									l, t = sct.monitors[0][:2]
-									r, b = sct.monitors[0][2:]
-									
-									for m in sct.monitors:
-										l = m[0] if l is None or l > m[0] else l
-										t = m[1] if t is None or t > m[1] else t
-										r = m[2] if r is None or r > m[2] else r
-										b = m[3] if b is None or b > m[3] else b
-									
-									dims = [ l, t, r, b ]
-								else:
-									dims = sct.monitors[args.display % len(sct.monitors)]
-								
-								sct_img = sct.grab(dims)
-								image = PIL.Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+                                    pyautogui.mouseDown(mouse_x, mouse_y, button=[ 'left', 'middle', 'right' ][button])
+                                elif event[0] == INPUT_EVENT_MOUSE_UP: # mouse up
+                                    mouse_x = max(0, min(real_width, event[1]))
+                                    mouse_y = max(0, min(real_height, event[2]))
+                                    button = event[3]
 
-							# Real dimensions
-							real_width, real_height = image.width, image.height
+                                    # Allow only left, middle, right
+                                    if button < 0 or button > 2:
+                                        continue
 
-							# Resize
-							if image.width > req_viewport_width or image.height > req_viewport_height:
-								image.thumbnail((req_viewport_width, req_viewport_height), DOWNSAMPLE)
+                                    pyautogui.mouseUp(mouse_x, mouse_y, button=[ 'left', 'middle', 'right' ][button])
+                                elif event[0] == INPUT_EVENT_MOUSE_SCROLL: # mouse scroll
+                                    mouse_x = max(0, min(real_width, event[1]))
+                                    mouse_y = max(0, min(real_height, event[2]))
+                                    dy = int(event[3])
 
-							# Write header: frame response
-							buffer.seek(0)
-							buffer.write(encode_int8(0x02))
-							buffer.write(encode_int16(real_width))
-							buffer.write(encode_int16(real_height))
+                                    pyautogui.scroll(dy, mouse_x, mouse_y)
+                                elif event[0] == INPUT_EVENT_KEY_DOWN: # keypress
+                                    keycode = event[1]
 
-							# Compare frames
-							if last_frame is not None:
-								diff_bbox = PIL.ImageChops.difference(last_frame, image).getbbox()
+                                    pyautogui.keyDown(keycode)
+                                    update_key_state(keycode, True)
+                                elif event[0] == INPUT_EVENT_KEY_UP: # keypress
+                                    keycode = event[1]
 
-							# Check if this is first frame of should force repaint full surface
-							if last_frame is None or \
-									viewport_width != req_viewport_width or \
-									viewport_height != req_viewport_height or \
-									partial_frames_since_last_full_repaint_frame > MIN_PARTIAL_FRAMES_BEFORE_FULL_REPAINT or \
-									empty_frames_since_last_full_repaint_frame > MIN_EMPTY_FRAMES_BEFORE_FULL_REPAINT:
-								buffer.write(encode_int8(0x01))
+                                    pyautogui.keyUp(keycode)
+                                    update_key_state(keycode, False)
+                    except:
+                        traceback.print_exc()
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    print(f'ws connection closed with exception { ws.exception() }')
+        except:
+            traceback.print_exc()
 
-								# Write body
-								image.save(fp=buffer, format='JPEG', quality=quality)
-								last_frame = image
+    await async_worker()
 
-								viewport_width = req_viewport_width
-								viewport_height = req_viewport_height
-								partial_frames_since_last_full_repaint_frame = 0
-								empty_frames_since_last_full_repaint_frame = 0
+    # Release stuck keys
+    release_keys()
 
-							# Send nop
-							elif diff_bbox is None :
-								buffer.write(encode_int8(0x00))
-								empty_frames_since_last_full_repaint_frame += 1
+    return ws
 
-							# Send partial repaint region
-							else:
-								buffer.write(encode_int8(0x02))
-								buffer.write(encode_int16(diff_bbox[0])) # crop_x
-								buffer.write(encode_int16(diff_bbox[1])) # crop_y
 
-								# Write body
-								cropped = image.crop(diff_bbox)
-								cropped.save(fp=buffer, format='JPEG', quality=quality)
-								last_frame = image
-								partial_frames_since_last_full_repaint_frame += 1
+async def get__connect_view_ws(request: aiohttp.web.Request) -> aiohttp.web.StreamResponse:
+    """
+    WebSocket endpoint for frame stream
+    """
 
-							buflen = buffer.tell()
-							buffer.seek(0)
-							mbytes = buffer.read(buflen)
+    # Check access
+    access = (args.password == request.query.get('password', '').strip()) or (args.view_password == request.query.get('password', '').strip())
 
-							await ws.send_bytes(mbytes)
+    # Log request
+    now = datetime.now()
+    now = now.strftime("%d.%m.%Y-%H:%M:%S")
+    print(f'[{ now }] { request.remote } { request.method } [{ "VIEW" if access else "NO ACCESS" }] { request.path_qs }')
 
-						# Input request
-						if packet_type == 0x03:
-								
-							# Skip non-control access
-							if not has_control_access:
-								continue
+    # Open socket
+    ws = aiohttp.web.WebSocketResponse()
+    await ws.prepare(request)
 
-							# Unpack events data
-							data = json.loads(bytes.decode(payload, encoding='ascii'))
+    # Close with error code on no access
+    if not access:
+        await ws.close(code=4001, message=b'Unauthorized')
+        return ws
 
-							# Iterate events
-							for event in data:
-								if event[0] == INPUT_EVENT_MOUSE_MOVE: # mouse position
-									mouse_x = max(0, min(real_width, event[1]))
-									mouse_y = max(0, min(real_height, event[2]))
+    # Frame buffer
+    buffer = BytesIO()
 
-									pyautogui.moveTo(mouse_x, mouse_y)
-								elif event[0] == INPUT_EVENT_MOUSE_DOWN: # mouse down
-									mouse_x = max(0, min(real_width, event[1]))
-									mouse_y = max(0, min(real_height, event[2]))
-									button = event[3]
+    # Read stream
+    async def async_worker():
 
-									# Allow only left, middle, right
-									if button < 0 or button > 2:
-										continue
+        # Last screen frame
+        last_frame = None
+        # Track count of partial frames send since last full repaint frame send and prevent firing full frames on low internet
+        partial_frames_since_last_full_repaint_frame = 0
+        # Track count of empty frames send since last full repaint frame send and prevent firing full frames on low internet
+        empty_frames_since_last_full_repaint_frame = 0
 
-									pyautogui.mouseDown(mouse_x, mouse_y, button=[ 'left', 'middle', 'right' ][button])
-								elif event[0] == INPUT_EVENT_MOUSE_UP: # mouse up
-									mouse_x = max(0, min(real_width, event[1]))
-									mouse_y = max(0, min(real_height, event[2]))
-									button = event[3]
+        # Store remote viewport size to force-push full repaint
+        viewport_width = 0
+        viewport_height = 0
 
-									# Allow only left, middle, right
-									if button < 0 or button > 2:
-										continue
+        try:
 
-									pyautogui.mouseUp(mouse_x, mouse_y, button=[ 'left', 'middle', 'right' ][button])
-								elif event[0] == INPUT_EVENT_MOUSE_SCROLL: # mouse scroll
-									mouse_x = max(0, min(real_width, event[1]))
-									mouse_y = max(0, min(real_height, event[2]))
-									dy = int(event[3])
+            # Reply to requests
+            async for msg in ws:
 
-									pyautogui.scroll(dy, mouse_x, mouse_y)
-								elif event[0] == INPUT_EVENT_KEY_DOWN: # keypress
-									keycode = event[1]
+                # Receive input data
+                if msg.type == aiohttp.WSMsgType.BINARY:
+                    try:
 
-									pyautogui.keyDown(keycode)
-									update_key_state(keycode, True)
-								elif event[0] == INPUT_EVENT_KEY_UP: # keypress
-									keycode = event[1]
+                        # Drop on invalid packet
+                        if len(msg.data) == 0:
+                            continue
 
-									pyautogui.keyUp(keycode)
-									update_key_state(keycode, False)
-					except:
-						import traceback
-						traceback.print_exc()
-				elif msg.type == aiohttp.WSMsgType.ERROR:
-					print(f'ws connection closed with exception { ws.exception() }')
-		except:
-			import traceback
-			traceback.print_exc()
+                        # Parse params
+                        packet_type = decode_int8(msg.data[0:1])
+                        payload = msg.data[1:]
 
-	await async_worker()
+                        # Frame request
+                        if packet_type == 0x01:
+                            req_viewport_width = decode_int16(payload[0:2])
+                            req_viewport_height = decode_int16(payload[2:4])
+                            quality = decode_int8(payload[4:5])
 
-	# Release stuck keys
-	release_keys()
+                            # Grab frame
+                            if args.fullscreen:
+                                image = PIL.ImageGrab.grab(bbox=None, include_layered_windows=False, all_screens=True)
+                            else:
+                                image = PIL.ImageGrab.grab()
 
-	return ws
+                            # Real dimensions
+                            global real_width, real_height
+                            real_width, real_height = image.width, image.height
+
+                            # Resize
+                            if image.width > req_viewport_width or image.height > req_viewport_height:
+                                image.thumbnail((req_viewport_width, req_viewport_height), DOWNSAMPLE)
+
+                            # Write header: frame response
+                            buffer.seek(0)
+                            buffer.write(encode_int8(0x02))
+                            buffer.write(encode_int16(real_width))
+                            buffer.write(encode_int16(real_height))
+
+                            # Compare frames
+                            if last_frame is not None:
+                                diff_bbox = PIL.ImageChops.difference(last_frame, image).getbbox()
+
+                            # Check if this is first frame of should force repaint full surface
+                            if last_frame is None or \
+                                    viewport_width != req_viewport_width or \
+                                    viewport_height != req_viewport_height or \
+                                    partial_frames_since_last_full_repaint_frame > MIN_PARTIAL_FRAMES_BEFORE_FULL_REPAINT or \
+                                    empty_frames_since_last_full_repaint_frame > MIN_EMPTY_FRAMES_BEFORE_FULL_REPAINT:
+                                buffer.write(encode_int8(0x01))
+
+                                # Write body
+                                image.save(fp=buffer, format='JPEG', quality=quality)
+                                last_frame = image
+
+                                viewport_width = req_viewport_width
+                                viewport_height = req_viewport_height
+                                partial_frames_since_last_full_repaint_frame = 0
+                                empty_frames_since_last_full_repaint_frame = 0
+
+                            # Send nop
+                            elif diff_bbox is None :
+                                buffer.write(encode_int8(0x00))
+                                empty_frames_since_last_full_repaint_frame += 1
+
+                            # Send partial repaint region
+                            else:
+                                buffer.write(encode_int8(0x02))
+                                buffer.write(encode_int16(diff_bbox[0])) # crop_x
+                                buffer.write(encode_int16(diff_bbox[1])) # crop_y
+
+                                # Write body
+                                cropped = image.crop(diff_bbox)
+                                cropped.save(fp=buffer, format='JPEG', quality=quality)
+                                last_frame = image
+                                partial_frames_since_last_full_repaint_frame += 1
+
+                            buflen = buffer.tell()
+                            buffer.seek(0)
+                            mbytes = buffer.read(buflen)
+                            buffer.seek(0)
+
+                            await ws.send_bytes(mbytes)
+
+                    except:
+                        traceback.print_exc()
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    print(f'ws connection closed with exception { ws.exception() }')
+        except:
+            traceback.print_exc()
+
+    await async_worker()
+
+    return ws
 
 
 # Encoded page hoes here
 # <template:INDEX_CONTENT>
-INDEX_CONTENT = None
 # </template:INDEX_CONTENT>
 
 
 # handler for /
 async def get__root(request: aiohttp.web.Request):
 
-	# Log request
-	now = datetime.now()
-	now = now.strftime("%d.%m.%Y-%H:%M:%S")
-	print(f'[{ now }] { request.remote } { request.method } { request.path_qs }')
+    # Log request
+    now = datetime.now()
+    now = now.strftime("%d.%m.%Y-%H:%M:%S")
+    print(f'[{ now }] { request.remote } { request.method } { request.path_qs }')
 
-	# Page
-	# <template:get__root>
-	if INDEX_CONTENT is not None:
-		return aiohttp.web.Response(body=INDEX_CONTENT, content_type='text/html', status=200, charset='utf-8')
-	else:
-		return aiohttp.web.FileResponse('index.html')
-	# </template:get__root>
+    # Page
+    # <template:get__root>
+    return aiohttp.web.FileResponse('index.html')
+    # </template:get__root>
 
 
 if __name__ == '__main__':
-	# Validator
-	def check_positive(value):
-		ivalue = int(value)
-		if ivalue < 0:
-			raise argparse.ArgumentTypeError(f'{ ivalue } should be positive int')
-		return ivalue
-	
-	# Args
-	parser = argparse.ArgumentParser(description='Process some integers.')
-	parser.add_argument('--port', type=int, default=7417, metavar='{1..65535}', choices=range(1, 65535), help='server port')
-	parser.add_argument('--password', type=str, default=None, help='password for remote control session')
-	parser.add_argument('--view_password', type=str, default=None, help='password for view only session (can only be set if --password is set)')
-	parser.add_argument('--fullscreen', action='store_true', default=False, help='enable multi-display screen capture')
-	parser.add_argument('--display', type=check_positive, default=0, help='display id for streaming')
-	args = parser.parse_args()
 
-	# Post-process args
-	if args.password is None:
-		args.password = ''
-	else:
-		args.password = args.password.strip()
+    # Args
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument('--port', type=int, default=7417, metavar='{1..65535}', choices=range(1, 65535), help='server port')
+    parser.add_argument('--password', type=str, default=None, help='password for remote control session')
+    parser.add_argument('--view_password', type=str, default=None, help='password for view only session (can only be set if --password is set)')
+    parser.add_argument('--fullscreen', action='store_true', default=False, help='enable multi-display screen capture')
+    args = parser.parse_args()
 
-	# If password not set, but password for view is set, ignore view mode
-	if args.password == '':
-		args.view_password = ''
+    # Password post-process
+    if args.password is None:
 
-	# Set up server
-	app = aiohttp.web.Application()
+        # If no passwords set, enable no-password input+view mode
+        if args.view_password is None:
+            args.password = ''
 
-	# Routes
-	app.router.add_get('/connect_ws', get__connect_ws)
-	app.router.add_get('/', get__root)
+        # If only view password set, enable password-protected view mode
+        else:
+            args.view_password = args.view_password.strip()
 
-	# Listen
-	aiohttp.web.run_app(app=app, port=args.port)
+    else:
+
+        # Enable password-protected input+view mode
+        args.password = args.password.strip()
+
+        # If view password is set, enable password-protected view mode
+        if args.view_password is not None:
+            args.view_password = args.view_password.strip()
+
+    # Check for match and fallback to input + view mode
+    if args.password == args.view_password:
+        args.view_password = None
+
+    # Set up server
+    app = aiohttp.web.Application()
+
+    # Routes
+    app.router.add_get('/connect_input_ws', get__connect_input_ws)
+    app.router.add_get('/connect_view_ws', get__connect_view_ws)
+    app.router.add_get('/', get__root)
+
+    # Listen
+    aiohttp.web.run_app(app=app, port=args.port)

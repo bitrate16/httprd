@@ -101,17 +101,32 @@
 				background-color: #77e;
 			}
 
-			#config {
-				position: absolute;
-				width: 1rem;
-				height: 1rem;
-				bottom: 1rem;
-				right: 1rem;
-				overflow: hidden;
-				font-size: 1rem;
-				cursor: pointer;
-				user-select: none;
-			}
+            #netstat {
+                position: absolute;
+                /* width: 1rem; */
+                height: 1rem;
+                bottom: 1rem;
+                left: 1rem;
+                overflow: hidden;
+                font-size: 1rem;
+                user-select: none;
+                color: #000;
+                text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+            }
+
+            #config {
+                position: absolute;
+                width: 1rem;
+                height: 1rem;
+                bottom: 1rem;
+                right: 1rem;
+                overflow: hidden;
+                font-size: 1rem;
+                cursor: pointer;
+                user-select: none;
+                color: #000;
+                text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+            }
 		</style>
 	</head>
 	<body>
@@ -127,6 +142,7 @@
 			</div>
 			<div id="shadow" onclick="hideConfigDialog();"></div>
 		</div>
+		<div id="netstat"></div>
 		<div id="config" onclick="showConfigDialog();">⚙</div>
 		<script type="text/javascript" async>
 			(async function () {
@@ -219,19 +235,19 @@
 					return template.content.firstChild;
 				};
 
-				function hideConfigDialog() {
+				async function hideConfigDialog() {
+                    await app.startConnection();
 					document.getElementById('dialog').style.display='none';
-					startWorkerLoop();
 				}
 
 				async function showConfigDialog() {
-					stopWorkerLoop();
+                    await app.stopConnection();
 
 					document.getElementById('dialog').style.display=null;
 					var form = document.getElementById('form');
 					form.innerHTML = '';
 
-					for (const [key, value] of Object.entries(get_props())) {
+					for (const [key, value] of Object.entries(getProps())) {
 						var element = htmlToElement(`
 						<div class="input-field">
 							<label>${ key }</label>
@@ -244,7 +260,7 @@
 						form.appendChild(element);
 						document.querySelector(`#submit-${ key }`).addEventListener('click', function () {
 							let newValue = document.querySelector(`#input-${ key }`).value.trim();
-							set_prop(key, newValue);
+							setProp(key, newValue);
 							showToast(`Set value for ${ key }`, 1, 1);
 						});
 					}
@@ -290,399 +306,15 @@
 
 
 				// Socket + loop state
-
-				app.remoteSocket = null;
+				app.viewSocket = null;
 				app.workerLoopTs = 0;
 				app.workerLoopShouldRun = false;
-
-
-				// Input workers
-
-				function startInputLoop() {
-
-					// Input event types
-					const INPUT_EVENT_MOUSE_MOVE   = 0;
-					const INPUT_EVENT_MOUSE_DOWN   = 1;
-					const INPUT_EVENT_MOUSE_UP     = 2;
-					const INPUT_EVENT_MOUSE_SCROLL = 3;
-					const INPUT_EVENT_KEY_DOWN     = 4;
-					const INPUT_EVENT_KEY_UP       = 5;
-
-					console.info('startInputLoop() : starting input loop');
-
-					// Map JS kkode to pyautogui
-					const jsToPyKeys = {
-						"Quote": "'",
-						"Plus": "+",
-						"Comma": ",",
-						"Minus": "-",
-						"Period": ".",
-						"Slash": "/",
-						"Digit0": "0",
-						"Digit1": "1",
-						"Digit2": "2",
-						"Digit3": "3",
-						"Digit4": "4",
-						"Digit5": "5",
-						"Digit6": "6",
-						"Digit7": "7",
-						"Digit8": "8",
-						"Digit9": "9",
-						"Semicolon": ";",
-						"Equal": "=",
-						"BracketLeft": "[",
-						"Backslash": "\\",
-						"BracketRight": "]",
-						"Backquote": "`",
-						"KeyA": "a",
-						"KeyB": "b",
-						"KeyC": "c",
-						"KeyD": "d",
-						"KeyE": "e",
-						"KeyF": "f",
-						"KeyG": "g",
-						"KeyH": "h",
-						"KeyI": "i",
-						"KeyJ": "j",
-						"KeyK": "k",
-						"KeyL": "l",
-						"KeyM": "m",
-						"KeyN": "n",
-						"KeyO": "o",
-						"KeyP": "p",
-						"KeyQ": "q",
-						"KeyR": "r",
-						"KeyS": "s",
-						"KeyT": "t",
-						"KeyU": "u",
-						"KeyV": "v",
-						"KeyW": "w",
-						"KeyX": "x",
-						"KeyY": "y",
-						"KeyZ": "z",
-						"NumpadAdd": "add",
-						"AltLeft": "altleft",
-						"AltRight": "altright",
-						"Backspace": "backspace",
-						"BrowserBack": "browserback",
-						"BrowserFavourites": "browserfavorites",
-						"BrowserForward": "browserforward",
-						"BrowserHome": "browserhome",
-						"BrowserRefresh": "browserrefresh",
-						"BrowserSearch": "browsersearch",
-						"BrowserStop": "browserstop",
-						"CapsLock": "capslock",
-						"Convert": "convert",
-						"ControlLeft": "ctrlleft",
-						"ControlRight": "ctrlright",
-						"NumpadDecimal": "decimal",
-						"Delete": "delete",
-						"NumpadDivide": "divide",
-						"ArrowDown": "down",
-						"End": "end",
-						"Enter": "enter",
-						"Escape": "escape",
-						"F1": "f1",
-						"F2": "f2",
-						"F3": "f3",
-						"F4": "f4",
-						"F5": "f5",
-						"F6": "f6",
-						"F7": "f7",
-						"F8": "f8",
-						"F9": "f9",
-						"F10": "f10",
-						"F11": "f11",
-						"F12": "f12",
-						"F13": "f13",
-						"F14": "f14",
-						"F15": "f15",
-						"F16": "f16",
-						"F17": "f17",
-						"F18": "f18",
-						"F19": "f19",
-						"F20": "f20",
-						"F21": "f21",
-						"F22": "f22",
-						"F23": "f23",
-						"F24": "f24",
-						"Fn": "fn",
-						"Help": "help",
-						"Home": "home",
-						"Insert": "insert",
-						"KanaMode": "kana",
-						"LaunchApp1": "launchapp1",
-						"LaunchApp2": "launchapp2",
-						"LaunchMail": "launchmail",
-						"MediaSelect": "launchmediaselect",
-						"ArrowLeft": "left",
-						"NumpadMultiply": "multiply",
-						"MediaTrackNext": "nexttrack",
-						"NonConvert": "nonconvert",
-						"Numpad0": "num0",
-						"Numpad1": "num1",
-						"Numpad2": "num2",
-						"Numpad3": "num3",
-						"Numpad4": "num4",
-						"Numpad5": "num5",
-						"Numpad6": "num6",
-						"Numpad7": "num7",
-						"Numpad8": "num8",
-						"Numpad9": "num9",
-						"NumLock": "numlock",
-						"PageDown": "pagedown",
-						"PageUp": "pageup",
-						"Pause": "pause",
-						"MediaPlayPause": "playpause",
-						"MediaTrackPrevious": "prevtrack",
-						"Print": "print",
-						"PrintScreen": "printscreen",
-						"ArrowRight": "right",
-						"ScrollLock": "scrolllock",
-						"Select": "select",
-						"ShiftLeft": "shiftleft",
-						"ShiftRight": "shiftright",
-						"Sleep": "sleep",
-						"Space": "space",
-						"MediaStop": "stop",
-						"NumpadSubtract": "subtract",
-						"Tab": "tab",
-						"ArrowUp": "up",
-						"AudioVolumeDown": "volumedown",
-						"VolumeDown": "volumedown",
-						"AudioVolumeMute": "volumemute",
-						"AudioVolumeUp": "volumeup",
-						"VolumeUp": "volumeup",
-						"OSLeft": "winleft",
-						"MetaLeft": "winleft",
-						"OSRight": "winright",
-						"MetaRight": "winright",
-						"IntlYen": "yen",
-					};
-
-					// Bug/Feature: ShiftLeft up not triggered if ShiftRight is pressed, and vice versa
-					// Solution: Fire release for both keys
-					var ShiftLeftPressed = false;
-					var ShiftRightPressed = false;
-
-					app.inputEvents = [];
-					app.remote = { width: 0, height: 0 };
-					app.lastInputTs = Date.now();
-
-					// Input handler
-					var lastMouseMoveTs = Date.now();
-					app.mouseMoveEventHandler = function (event) {
-						// Fire only inside viewbox & with throttling to ips x 2
-						if (
-							app.viewport.width === 0 ||
-							app.viewport.height === 0 ||
-							app.lastInputTs <= lastMouseMoveTs
-						) return;
-
-						let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
-						let rectY = (app.canvas.clientHeight / 2) - (app.viewport.height / 2);
-
-						if (
-							event.pageX >= rectX && event.pageX <= rectX + app.viewport.width &&
-							event.pageY >= rectY && event.pageY <= rectY + app.viewport.height
-						) {
-							let realX = Math.round((event.pageX - rectX) * app.remote.width / app.viewport.width);
-							let realY = Math.round((event.pageY - rectY) * app.remote.height / app.viewport.height);
-
-							app.inputEvents.push([
-								INPUT_EVENT_MOUSE_MOVE,
-								realX,
-								realY
-							]);
-
-							lastMouseMoveTs = Date.now();
-						}
-					};
-
-					// Input handler
-					var lastMouseScrollTs = Date.now();
-					app.mouseScrollEventHandler = function (event) {
-						// Fire only inside viewbox & with throttling to ips x 2
-						if (
-							app.viewport.width === 0 ||
-							app.viewport.height === 0
-						) return;
-
-						let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
-						let rectY = (app.canvas.clientHeight / 2) - (app.viewport.height / 2);
-
-						if (
-							event.pageX >= rectX && event.pageX <= rectX + app.viewport.width &&
-							event.pageY >= rectY && event.pageY <= rectY + app.viewport.height
-						) {
-							let realX = Math.round((event.pageX - rectX) * app.remote.width / app.viewport.width);
-							let realY = Math.round((event.pageY - rectY) * app.remote.height / app.viewport.height);
-
-							app.inputEvents.push([
-								INPUT_EVENT_MOUSE_SCROLL,
-								realX,
-								realY,
-								-event.deltaY
-							]);
-
-							lastMouseScrollTs = Date.now();
-						}
-					};
-
-					// Input handler
-					app.mouseDownEventHandler = function (event) {
-						// Stop event
-						event.preventDefault();
-						event.stopPropagation();
-
-						// Check
-						if (app.remote.width === 0 || app.remote.height === 0)
-							return;
-
-						let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
-						let rectY = (app.canvas.clientHeight / 2) - (app.viewport.height / 2);
-
-						if (
-							event.pageX >= rectX && event.pageX <= rectX + app.viewport.width &&
-							event.pageY >= rectY && event.pageY <= rectY + app.viewport.height
-						) {
-							let realX = Math.round((event.pageX - rectX) * app.remote.width / app.viewport.width);
-							let realY = Math.round((event.pageY - rectY) * app.remote.height / app.viewport.height);
-
-							app.inputEvents.push([
-								INPUT_EVENT_MOUSE_DOWN,
-								realX,
-								realY,
-								event.button,
-							]);
-						}
-					};
-
-					// Input handler
-					app.mouseUpEventHandler = function (event) {
-						// Stop event
-						event.preventDefault();
-						event.stopPropagation();
-
-						// Check
-						if (app.remote.width === 0 || app.remote.height === 0)
-							return;
-
-						let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
-						let rectY = (app.canvas.clientHeight / 2) - (app.viewport.height / 2);
-
-						let realX = Math.round((event.pageX - rectX) * app.remote.width / app.viewport.width);
-						let realY = Math.round((event.pageY - rectY) * app.remote.height / app.viewport.height);
-
-						app.inputEvents.push([
-							INPUT_EVENT_MOUSE_UP,
-							realX,
-							realY,
-							event.button,
-						]);
-					};
-
-					// Context menu suppress
-					app.contextMenuCancelEventHandler = function (event) {
-						event.preventDefault();
-						event.stopPropagation();
-						return false;
-					};
-
-					// Keys Input handler
-					var lastKeyDownTs = Date.now();
-					app.keyDownEventHandler = function (event) {
-						event.preventDefault();
-						event.stopPropagation();
-
-						ShiftLeftPressed = ShiftLeftPressed || event.code === 'ShiftLeft';
-						ShiftRightPressed = ShiftRightPressed || event.code === 'ShiftRight';
-
-						var key = jsToPyKeys[event.code];
-						
-						// Prevent sending repeating key twice if key is in current queue
-						for (let i = 0; i < app.inputEvents.length; ++i)
-							if (app.inputEvents[i][0] == INPUT_EVENT_KEY_DOWN && app.inputEvents[i][1] === key)
-								return;
-
-						if (event.code in jsToPyKeys) {
-							app.inputEvents.push([
-								INPUT_EVENT_KEY_DOWN,
-								key
-							]);
-						}
-
-						return false;
-					};
-
-					// Keys Input handler
-					app.keyUpEventHandler = function (event) {
-						event.preventDefault();
-						event.stopPropagation();
-						
-						var key = jsToPyKeys[event.code];
-						
-						// Prevent sending repeating key twice if key is in current queue
-						for (let i = 0; i < app.inputEvents.length; ++i)
-							if (app.inputEvents[i][0] == INPUT_EVENT_KEY_UP && app.inputEvents[i][1] === key)
-								return;
-
-						if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
-							if (ShiftLeftPressed) {
-								app.inputEvents.push([
-									INPUT_EVENT_KEY_UP,
-									jsToPyKeys['ShiftLeft']
-								]);
-							}
-
-							if (ShiftRightPressed) {
-								app.inputEvents.push([
-									INPUT_EVENT_KEY_UP,
-									jsToPyKeys['ShiftRight']
-								]);
-							}
-
-						} else if (event.code in jsToPyKeys) {
-							app.inputEvents.push([
-								INPUT_EVENT_KEY_UP,
-								key
-							]);
-						}
-
-						return false;
-					};
-
-					// Register listeners
-					app.canvas.addEventListener('mousemove', app.mouseMoveEventHandler);
-					app.canvas.addEventListener('wheel', app.mouseScrollEventHandler);
-					app.canvas.addEventListener('mousedown', app.mouseDownEventHandler);
-					app.canvas.addEventListener('mouseup', app.mouseUpEventHandler);
-					app.canvas.addEventListener('contextmenu', app.contextMenuCancelEventHandler);
-
-					document.addEventListener('keydown', app.keyDownEventHandler);
-					document.addEventListener('keyup', app.keyUpEventHandler);
-				};
-
-				function stopInputLoop() {
-					console.info('stopInputLoop() : stopping input loop');
-
-					app.canvas.removeEventListener('mousemove', app.mouseMoveEventHandler);
-					app.canvas.removeEventListener('wheel', app.mouseScrollEventHandler);
-					app.canvas.removeEventListener('mousedown', app.mouseDownEventHandler);
-					app.canvas.removeEventListener('mouseup', app.mouseUpEventHandler);
-					app.canvas.removeEventListener('contextmenu', app.contextMenuCancelEventHandler);
-
-					document.removeEventListener('keydown', app.keyDownEventHandler);
-					document.removeEventListener('keyup', app.keyUpEventHandler);
-
-					app.inputEvents = [];
-				}
 
 
 				// Default app.props
 				const DEFAULT_PROPS = {
 					'password': '',
-					'quality': 75,
+					'quality': 50,
 					'fps': 20,
 					'ips': 5
 				};
@@ -691,8 +323,7 @@
 
 
 				// props access
-
-				function init_props() {
+				function initProps() {
 					app.props = { ...DEFAULT_PROPS };
 
 					try {
@@ -705,15 +336,15 @@
 					} catch {}
 				};
 
-				function get_prop(name) {
+				function getProp(name) {
 					return app.props[name];
 				};
 
-				function get_props() {
+				function getProps() {
 					return app.props;
 				}
 
-				function set_prop(name, value) {
+				function setProp(name, value) {
 					if (name === 'password') {
 						value = value.trim();
 					} else if (name === 'quality') {
@@ -749,285 +380,869 @@
 					localStorage.setItem('httprd-app.props', JSON.stringify(app.props));
 				};
 
+				initProps();
 
-				// Worker
 
-				function stopWorkerLoop() {
-					console.info('stopWorkerLoop() : stopping loop');
+                // Canvas + ctx
+				app.canvas = document.getElementById('display');
+				app.canvasContext = app.canvas.getContext('2d');
 
-					try {
-						// Mark loop as not restarting
-						app.workerLoopShouldRun = false;
-						app.remoteSocket.close();
-					} catch (e) {
-						console.error(e);
-					}
-				}
 
-				function startWorkerLoop() {
-					// Mark loop as restarting
-					app.workerLoopShouldRun = true;
-					impl_startWorkerLoop();
-				}
+                // Network status view
+                var netstatElement = document.querySelector('#netstat');
 
-				function impl_startWorkerLoop() {
-					console.info('startWorkerLoop() : starting loop');
+                // Connecion activator based on promise
+                app.startConnection = async function() {
 
-					// Stop existing loop
-					var loopTs = Date.now();
-					if (app.workerLoopTs !== 0)
-						return;
+                    console.log('startConnection() : enter');
 
-					// Check if loop is still running
-					function checkLoop() {
-						return loopTs === app.workerLoopTs;
-					}
+                    // Prevent stacking
+                    if (app.isConnectionRunning) {
+                        console.log('startConnection() : unstack');
 
-					// Publish new loop timestamp
-					app.workerLoopTs = loopTs;
+                        return;
+                    }
+
+                    // Indicate this thread as self-reconnectable
+                    app.keepAlive = true;
+                    app.viewPromise = null;
+                    app.inputPromise = null;
 
 					// Clear dimensions of desktop
 					app.remote = { width: 0, height: 0 };
 					app.viewport = { width: 0, height: 0 };
 
-					var requestFrame = function () {
-						var requestFrame__buffer = new Uint8Array(1 + 2 + 2 + 1);
+                    // Flag if started
+                    app.isConnectionRunning = true;
 
-						// Skip if loop is closed
-						if (!checkLoop())
-							return;
+                    // Clear network status
+                    netstatElement.textContent = '';
 
-						try {
-							// Send packet type
-							encode_int8(0x01, requestFrame__buffer, 0);
+                    // Start view connection
+                    app.viewPromise = new Promise((resolve, _) => {
 
-							// Send width & height
-							let viewport_width = Math.max(Math.min(window.innerWidth, 65535), 1);
-							let viewport_height = Math.max(Math.min(window.innerHeight, 65535), 1);
-							let quality = Math.max(Math.min(get_prop('quality'), 100), 1);
-							encode_int16(viewport_width, requestFrame__buffer, 1);
-							encode_int16(viewport_height, requestFrame__buffer, 3);
-							encode_int8(quality, requestFrame__buffer, 5);
+                        // Indicate if toasted access error
+                        var hasShownPasswordError = false;
 
-							// Actually, send
-							app.remoteSocket.send(requestFrame__buffer.buffer);
-						} catch (e) {
-							console.error(e);
-						}
+                        // Create connection to the view mode thread
+                        var makeViewConnection = function() {
 
-						delete requestFrame__buffer;
-					};
+                            // Send frame request to server
+                            var lastFrameRequestTS = null;
+                            var requestFrame = function () {
 
-					var pushInput = function () {
+                                // Exit all handlers/coroutines if they were called after socket close
+                                if (!app.keepAlive || mySocketRef.readyState === WebSocket.CLOSED) {
+                                    try {
+                                        mySocketRef.close();
+                                    } catch {}
+                                    return;
+                                }
 
-						// Skip if loop is closed
-						if (!checkLoop())
-							return;
+                                var requestFrame__buffer = new Uint8Array(1 + 2 + 2 + 1);
 
-						try {
-							if (app.inputEvents.length) {
-								var inputEvents = app.inputEvents;
-								app.inputEvents = [];
+                                try {
+                                    // Send packet type
+                                    encode_int8(0x01, requestFrame__buffer, 0);
 
-								var serialized = JSON.stringify(inputEvents);
-								var requestInput__buffer = new Uint8Array(1 + serialized.length);
+                                    // Send width & height
+                                    let viewport_width = Math.max(Math.min(window.innerWidth, 65535), 1);
+                                    let viewport_height = Math.max(Math.min(window.innerHeight, 65535), 1);
+                                    let quality = Math.max(Math.min(getProp('quality'), 100), 1);
+                                    encode_int16(viewport_width, requestFrame__buffer, 1);
+                                    encode_int16(viewport_height, requestFrame__buffer, 3);
+                                    encode_int8(quality, requestFrame__buffer, 5);
 
-								// Send packet type
-								encode_int8(0x03, requestInput__buffer, 0);
+                                    // Actually, send
+                                    lastFrameRequestTS = Date.now();
+                                    mySocketRef.send(requestFrame__buffer.buffer);
+                                } catch (e) {
+                                    console.error(e);
+                                }
 
-								// Send data
-								for (let ind = 0; ind < serialized.length; ++ind)
-									requestInput__buffer[ind + 1] = serialized.charCodeAt(ind);
+                                delete requestFrame__buffer;
+                            };
 
-								// Actually, send
-								app.remoteSocket.send(requestInput__buffer.buffer);
-								app.lastInputTs = Date.now();
+                            var updateSize = function () {
+                                // Resize canvas
+                                if (app.canvas.width != window.innerWidth || app.canvas.height != window.innerHeight) {
+                                    app.canvas.width = window.innerWidth;
+                                    app.canvas.height = window.innerHeight;
 
-								delete requestInput__buffer;
-							}
-						} catch (e) {
-							console.error(e);
-						}
+                                    // Update app.props for view
+                                    app.lineHeight = window.getComputedStyle(document.body).lineHeight;
+                                    app.pageHeight = window.clientHeight;
+                                }
+                            };
 
-						setTimeout(pushInput, 1000.0 / get_prop('ips'));
-					};
+                            // Interframe delay based on props, props can not be changed during active session
+                            var interframeDelay = 1000.0 / getProp('fps');
 
-					var updateSize = function () {
-						// Resize canvas
-						if (app.canvas.width != window.innerWidth || app.canvas.height != window.innerHeight) {
-							app.canvas.width = window.innerWidth;
-							app.canvas.height = window.innerHeight;
+                            function viewSocketMessageHandler(msg) {
 
-							// Update app.props for view
-							app.lineHeight = window.getComputedStyle(document.body).lineHeight;
-							app.pageHeight = window.clientHeight;
-						}
-					};
+                                // Exit all handlers/coroutines if they were called after socket close
+                                if (!app.keepAlive || mySocketRef.readyState === WebSocket.CLOSED) {
+                                    try {
+                                        mySocketRef.close();
+                                    } catch {}
+                                    return;
+                                }
 
-					function msg_handler(msg) {
-						if (msg.data instanceof ArrayBuffer) {
-							var data = new Uint8Array(msg.data);
-							var packet_type = decode_int8(data, 0);
+                                // Typed messages
+                                if (msg.data instanceof ArrayBuffer) {
+                                    var data = new Uint8Array(msg.data);
+                                    var packet_type = decode_int8(data, 0);
 
-							// Frame
-							if (packet_type == 0x02) {
-								try {
-									// Update remote desktop properties
-									app.remote.width = decode_int16(data, 1);
-									app.remote.height = decode_int16(data, 3);
-									var frame_type = decode_int8(data, 5);
+                                    // Frame
+                                    if (packet_type == 0x02) {
 
-									// Ignore empty frames
-									if (data.length === 6 || frame_type === 0x00) {
-										// Re-request new frame in 2x interval
-										setTimeout(requestFrame, 2000.0 / get_prop('fps'));
-										return;
-									}
+                                        // Frame request RTT
+                                        var frameRTT = Date.now() - lastFrameRequestTS;
 
-									// Full redraw
-									if (frame_type === 0x01) {
-										// Get frame blob
-										var blob = new Blob([ data.slice(6) ], { type: 'image/jpeg' });
-										var url = URL.createObjectURL(blob);
+                                        // Update network status
+                                        netstatElement.textContent = `${ frameRTT }ms`;
 
-										// Deallocate
-										delete blob;
+                                        try {
+                                            // Update remote desktop properties
+                                            app.remote.width = decode_int16(data, 1);
+                                            app.remote.height = decode_int16(data, 3);
+                                            var frame_type = decode_int8(data, 5);
 
-										var frame = new Image();
-										frame.onload = function () {
-											URL.revokeObjectURL(url);
+                                            // Ignore empty frames
+                                            if (data.length === 6 || frame_type === 0x00) {
 
-											// Update canvas size if required
-											updateSize();
+                                                // Request new frame with respect to frame RTT in interframe FPS delay
+                                                if (interframeDelay * 2.0 <= frameRTT)
+                                                    requestFrame();
+                                                else
+                                                    setTimeout(requestFrame, interframeDelay * 2.0 - frameRTT);
 
-											app.canvasContext.drawImage(
-												frame,
-												app.canvas.width / 2 - frame.width / 2,
-												app.canvas.height / 2 - frame.height / 2
-											);
+                                            // Full redraw
+                                            } else if (frame_type === 0x01) {
 
-											// Received frame size
-											app.viewport.width = frame.width;
-											app.viewport.height = frame.height;
+                                                // Get frame blob
+                                                var blob = new Blob([ data.slice(6) ], { type: 'image/jpeg' });
+                                                var url = URL.createObjectURL(blob);
 
-											// Release
-											delete frame;
+                                                // Deallocate
+                                                delete blob;
 
-											// Re-request new frame in interval
-											setTimeout(requestFrame, 1000.0 / get_prop('fps'));
-										};
-										frame.src = url;
+                                                var frame = new Image();
+                                                frame.onload = function () {
 
-									// Partial redraw
-									} else if (frame_type === 0x02) {
-										var crop_x = decode_int16(data, 6);
-										var crop_y = decode_int16(data, 8);
+                                                    // Extract JPEG as base64 or sth similar
+                                                    URL.revokeObjectURL(url);
 
-										// Get frame blob
-										var blob = new Blob([ data.slice(10) ], { type: 'image/jpeg' });
-										var url = URL.createObjectURL(blob);
+                                                    // Update canvas size if required
+                                                    updateSize();
 
-										// Deallocate
-										delete blob;
+                                                    app.canvasContext.drawImage(
+                                                        frame,
+                                                        app.canvas.width / 2 - frame.width / 2,
+                                                        app.canvas.height / 2 - frame.height / 2
+                                                    );
 
-										var frame = new Image();
-										frame.onload = function () {
-											URL.revokeObjectURL(url);
+                                                    // Received frame size
+                                                    app.viewport.width = frame.width;
+                                                    app.viewport.height = frame.height;
 
-											// Update canvas size if required
-											updateSize();
+                                                    // Release
+                                                    delete frame;
 
-											app.canvasContext.drawImage(
-												frame,
-												app.canvas.width / 2 - app.viewport.width / 2 + crop_x,
-												app.canvas.height / 2 - app.viewport.height / 2 + crop_y
-											);
+                                                    // Request new frame with respect to frame RTT in interframe FPS delay
+                                                    if (interframeDelay <= frameRTT)
+                                                        requestFrame();
+                                                    else
+                                                        setTimeout(requestFrame, interframeDelay - frameRTT);
+                                                };
+                                                frame.src = url;
 
-											// Release
-											delete frame;
+                                            // Partial redraw
+                                            } else if (frame_type === 0x02) {
 
-											// Re-request new frame in interval
-											setTimeout(requestFrame, 1000.0 / get_prop('fps'));
-										};
-										frame.src = url;
-									}
-								} catch (e) {
-									console.error(e);
+                                                var crop_x = decode_int16(data, 6);
+                                                var crop_y = decode_int16(data, 8);
 
-									// Re-request new frame in interval as failed
-									setTimeout(requestFrame, 1000.0 / get_prop('fps'));
-								}
-							}
+                                                // Get frame blob
+                                                var blob = new Blob([ data.slice(10) ], { type: 'image/jpeg' });
+                                                var url = URL.createObjectURL(blob);
 
-							// Deallocate
-							delete data;
-						}
-					};
+                                                // Deallocate
+                                                delete blob;
 
-					function open_handler(event) {
-						console.info('open_handler() : started loop');
+                                                var frame = new Image();
+                                                frame.onload = function () {
 
-						if (!checkLoop())
-							return;
+                                                    URL.revokeObjectURL(url);
 
-						// Compute size dims
-						updateSize();
+                                                    // Update canvas size if required
+                                                    updateSize();
 
-						// Input workers
-						startInputLoop();
+                                                    app.canvasContext.drawImage(
+                                                        frame,
+                                                        app.canvas.width / 2 - app.viewport.width / 2 + crop_x,
+                                                        app.canvas.height / 2 - app.viewport.height / 2 + crop_y
+                                                    );
 
-						// Periodic frame poll
-						setTimeout(requestFrame, 1000.0 / get_prop('fps'));
+                                                    // Release
+                                                    delete frame;
 
-						// Start input pusher
-						setTimeout(pushInput, 1000.0 / get_prop('ips'));
+                                                    // Request new frame with respect to frame RTT in interframe FPS delay
+                                                    if (interframeDelay <= frameRTT)
+                                                        requestFrame();
+                                                    else
+                                                        setTimeout(requestFrame, interframeDelay - frameRTT);
+                                                };
+                                                frame.src = url;
+                                            }
+                                        } catch (e) {
 
-						document.title = 'HTTPRD (Connected)';
-					};
+                                            console.error(e);
 
-					function close_handler(event) {
-						console.info('close_handler() : stopping loop');
+                                            // Request new frame with respect to frame RTT in interframe FPS delay
+                                            if (interframeDelay <= frameRTT)
+                                                requestFrame();
+                                            else
+                                                setTimeout(requestFrame, interframeDelay - frameRTT);
+                                        }
+                                    }
 
-						stopInputLoop();
+                                    // Deallocate
+                                    delete data;
+                                }
+                            };
 
-						if (event.code === 4001)
-							showToast('Invalid password', 1, 1);
-						else
-							showToast('Connection closed', 1, 1);
+                            // Clean password error timeout if session haven't died
+                            var passwordErrorTimeout = null;
 
-						var restartWorkerLoop = function () {
-							app.workerLoopTs = 0;
-							if (app.workerLoopShouldRun)
-							impl_startWorkerLoop();
-						};
+                            // Set title second after connect
+                            var titleSetTimeout = null;
 
-						if (event.code === 4001)
-							setTimeout(restartWorkerLoop, 5000);
-						else
-							setTimeout(restartWorkerLoop, 250);
+                            function viewSocketOpenHandler(event) {
 
-						document.title = 'HTTPRD (Disconnected)';
-					};
+                                // Exit all handlers/coroutines if they were called after socket close
+                                if (!app.keepAlive || mySocketRef.readyState === WebSocket.CLOSED) {
+                                    try {
+                                        mySocketRef.close();
+                                    } catch {}
+                                    return;
+                                }
 
+                                // No password error
+                                passwordErrorTimeout = setTimeout(function() { hasShownPasswordError = false; }, 1000);
+                                titleSetTimeout = setTimeout(function() { document.title = 'HTTPRD (Connected)'; }, 1000);
 
-					// Connect socket
+                                // Start frame requesting
+                                requestFrame();
+                            };
 
-					console.info('connect to', `${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws`)
-					app.remoteSocket = new WebSocket(`${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_ws?password=${ encodeURIComponent(get_prop('password')) }`);
-					app.remoteSocket.binaryType = 'arraybuffer';
-					app.remoteSocket.onmessage = msg_handler;
-					app.remoteSocket.onopen = open_handler;
-					app.remoteSocket.onclose = close_handler;
-				}
+                            function viewSocketCloseHandler(event) {
 
-				app.canvas = document.getElementById('display');
-				app.canvasContext = app.canvas.getContext('2d');
+                                // Toast.makeText
+                                if (event.code === 4001) {
+                                    if (!hasShownPasswordError)
+                                        showToast('No access to input', 1, 1);
 
-				// Init config
-				init_props()
+                                    // Now we have problems with password
+                                    clearTimeout(passwordErrorTimeout);
+                                    hasShownPasswordError = true;
+                                } else
+                                    showToast('Input connection closed', 1, 1);
 
-				// Start loops
-				startWorkerLoop();
+                                // Undo setting title
+                                clearTimeout(titleSetTimeout);
+                                document.title = 'HTTPRD (Disconnected)';
+
+                                if (app.keepAlive) {
+
+                                    // Restart after 5 seconds
+                                    setTimeout(function() {
+
+                                        // Exit all handlers/coroutines if they were called after socket close
+                                        if (!app.keepAlive)
+                                            // Exit promise worker
+                                            resolve();
+                                        else
+                                            // rekonnekt
+                                            makeViewConnection();
+
+                                    // Delay based on status code
+                                    }, (event.code === 4001) ? 5000 : 1000);
+
+                                } else
+                                    // Exit promise worker
+                                    resolve();
+                            };
+
+                            console.info('connect to', `${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_view_ws`)
+                            var mySocketRef = new WebSocket(`${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_view_ws?password=${ encodeURIComponent(getProp('password')) }`);
+                            mySocketRef.binaryType = 'arraybuffer';
+                            mySocketRef.onmessage = viewSocketMessageHandler;
+                            mySocketRef.onopen = viewSocketOpenHandler;
+                            mySocketRef.onclose = viewSocketCloseHandler;
+                            app.viewSocket = mySocketRef;
+                        };
+
+                        // konnekt
+                        makeViewConnection();
+
+                    });
+
+                    // Start input connection
+                    app.inputPromise = new Promise((resolve, _) => {
+
+                        // Indicate if toasted access error
+                        var hasShownPasswordError = false;
+
+                        // Create connection to the view mode thread
+                        var makeInputConnection = function() {
+
+                            var ts = Date.now() % 100;
+
+                            function inputSocketMessageHandler(msg) {
+
+                                // Exit all handlers/coroutines if they were called after socket close
+                                if (!app.keepAlive) {
+                                    try {
+                                        app.viewSocket.close();
+                                    } catch {}
+                                }
+
+                                // Typed messages
+                                if (msg.data instanceof ArrayBuffer) {
+                                    var data = new Uint8Array(msg.data);
+                                    var packet_type = decode_int8(data, 0);
+
+                                    // Deallocate
+                                    delete data;
+                                }
+                            };
+
+                            // Clean password error timeout if session haven't died
+                            var passwordErrorTimeout = null;
+
+                            function inputSocketOpenHandler(event) {
+
+                                // Exit all handlers/coroutines if they were called after socket close
+                                if (!app.keepAlive || mySocketRef.readyState === WebSocket.CLOSED) {
+                                    try {
+                                        mySocketRef.close();
+                                    } catch {}
+                                    return;
+                                }
+
+                                // No password error
+                                passwordErrorTimeout = setTimeout(function() { hasShownPasswordError = false; }, 5000);
+
+                                // Do attachment of sender
+                                startInputLoop();
+                            };
+
+                            function inputSocketCloseHandler(event) {
+
+                                // Detach handlers
+                                stopInputLoop();
+
+                                // Toast.makeText
+                                if (event.code === 4001) {
+                                    if (!hasShownPasswordError)
+                                        showToast('No access to input', 1, 1);
+
+                                    // Now we have problems with password
+                                    clearTimeout(passwordErrorTimeout);
+                                    hasShownPasswordError = true;
+                                } else
+                                    showToast('Input connection closed', 1, 1);
+
+                                if (app.keepAlive) {
+
+                                    // Restart after 5 seconds
+                                    setTimeout(function() {
+
+                                        // Exit all handlers/coroutines if they were called after socket close
+                                        if (!app.keepAlive) {
+                                            // Exit promise worker
+                                            resolve();
+                                        } else
+                                            // rekonnekt
+                                            makeInputConnection();
+
+                                    // Delay based on status code
+                                    }, (event.code === 4001) ? 5000 : 1000);
+
+                                } else
+                                    // Exit promise worker
+                                    resolve();
+                            };
+
+                            console.info('connect to', `${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_input_ws`)
+                            var mySocketRef = new WebSocket(`${ window.location.protocol === 'https:' ? 'wss' : 'ws' }://${ window.location.host }/connect_input_ws?password=${ encodeURIComponent(getProp('password')) }`);
+                            mySocketRef.binaryType = 'arraybuffer';
+                            mySocketRef.onmessage = inputSocketMessageHandler;
+                            mySocketRef.onopen = inputSocketOpenHandler;
+                            mySocketRef.onclose = inputSocketCloseHandler;
+                            app.inputSocket = mySocketRef;
+
+                            // Input event types
+                            const INPUT_EVENT_MOUSE_MOVE   = 0;
+                            const INPUT_EVENT_MOUSE_DOWN   = 1;
+                            const INPUT_EVENT_MOUSE_UP     = 2;
+                            const INPUT_EVENT_MOUSE_SCROLL = 3;
+                            const INPUT_EVENT_KEY_DOWN     = 4;
+                            const INPUT_EVENT_KEY_UP       = 5;
+
+                            // Map JS kkode to pyautogui
+                            const jsToPyKeys = {
+                                "Quote": "'",
+                                "Plus": "+",
+                                "Comma": ",",
+                                "Minus": "-",
+                                "Period": ".",
+                                "Slash": "/",
+                                "Digit0": "0",
+                                "Digit1": "1",
+                                "Digit2": "2",
+                                "Digit3": "3",
+                                "Digit4": "4",
+                                "Digit5": "5",
+                                "Digit6": "6",
+                                "Digit7": "7",
+                                "Digit8": "8",
+                                "Digit9": "9",
+                                "Semicolon": ";",
+                                "Equal": "=",
+                                "BracketLeft": "[",
+                                "Backslash": "\\",
+                                "BracketRight": "]",
+                                "Backquote": "`",
+                                "KeyA": "a",
+                                "KeyB": "b",
+                                "KeyC": "c",
+                                "KeyD": "d",
+                                "KeyE": "e",
+                                "KeyF": "f",
+                                "KeyG": "g",
+                                "KeyH": "h",
+                                "KeyI": "i",
+                                "KeyJ": "j",
+                                "KeyK": "k",
+                                "KeyL": "l",
+                                "KeyM": "m",
+                                "KeyN": "n",
+                                "KeyO": "o",
+                                "KeyP": "p",
+                                "KeyQ": "q",
+                                "KeyR": "r",
+                                "KeyS": "s",
+                                "KeyT": "t",
+                                "KeyU": "u",
+                                "KeyV": "v",
+                                "KeyW": "w",
+                                "KeyX": "x",
+                                "KeyY": "y",
+                                "KeyZ": "z",
+                                "NumpadAdd": "add",
+                                "AltLeft": "altleft",
+                                "AltRight": "altright",
+                                "Backspace": "backspace",
+                                "BrowserBack": "browserback",
+                                "BrowserFavourites": "browserfavorites",
+                                "BrowserForward": "browserforward",
+                                "BrowserHome": "browserhome",
+                                "BrowserRefresh": "browserrefresh",
+                                "BrowserSearch": "browsersearch",
+                                "BrowserStop": "browserstop",
+                                "CapsLock": "capslock",
+                                "Convert": "convert",
+                                "ControlLeft": "ctrlleft",
+                                "ControlRight": "ctrlright",
+                                "NumpadDecimal": "decimal",
+                                "Delete": "delete",
+                                "NumpadDivide": "divide",
+                                "ArrowDown": "down",
+                                "End": "end",
+                                "Enter": "enter",
+                                "Escape": "escape",
+                                "F1": "f1",
+                                "F2": "f2",
+                                "F3": "f3",
+                                "F4": "f4",
+                                "F5": "f5",
+                                "F6": "f6",
+                                "F7": "f7",
+                                "F8": "f8",
+                                "F9": "f9",
+                                "F10": "f10",
+                                "F11": "f11",
+                                "F12": "f12",
+                                "F13": "f13",
+                                "F14": "f14",
+                                "F15": "f15",
+                                "F16": "f16",
+                                "F17": "f17",
+                                "F18": "f18",
+                                "F19": "f19",
+                                "F20": "f20",
+                                "F21": "f21",
+                                "F22": "f22",
+                                "F23": "f23",
+                                "F24": "f24",
+                                "Fn": "fn",
+                                "Help": "help",
+                                "Home": "home",
+                                "Insert": "insert",
+                                "KanaMode": "kana",
+                                "LaunchApp1": "launchapp1",
+                                "LaunchApp2": "launchapp2",
+                                "LaunchMail": "launchmail",
+                                "MediaSelect": "launchmediaselect",
+                                "ArrowLeft": "left",
+                                "NumpadMultiply": "multiply",
+                                "MediaTrackNext": "nexttrack",
+                                "NonConvert": "nonconvert",
+                                "Numpad0": "num0",
+                                "Numpad1": "num1",
+                                "Numpad2": "num2",
+                                "Numpad3": "num3",
+                                "Numpad4": "num4",
+                                "Numpad5": "num5",
+                                "Numpad6": "num6",
+                                "Numpad7": "num7",
+                                "Numpad8": "num8",
+                                "Numpad9": "num9",
+                                "NumLock": "numlock",
+                                "PageDown": "pagedown",
+                                "PageUp": "pageup",
+                                "Pause": "pause",
+                                "MediaPlayPause": "playpause",
+                                "MediaTrackPrevious": "prevtrack",
+                                "Print": "print",
+                                "PrintScreen": "printscreen",
+                                "ArrowRight": "right",
+                                "ScrollLock": "scrolllock",
+                                "Select": "select",
+                                "ShiftLeft": "shiftleft",
+                                "ShiftRight": "shiftright",
+                                "Sleep": "sleep",
+                                "Space": "space",
+                                "MediaStop": "stop",
+                                "NumpadSubtract": "subtract",
+                                "Tab": "tab",
+                                "ArrowUp": "up",
+                                "AudioVolumeDown": "volumedown",
+                                "VolumeDown": "volumedown",
+                                "AudioVolumeMute": "volumemute",
+                                "AudioVolumeUp": "volumeup",
+                                "VolumeUp": "volumeup",
+                                "OSLeft": "winleft",
+                                "MetaLeft": "winleft",
+                                "OSRight": "winright",
+                                "MetaRight": "winright",
+                                "IntlYen": "yen",
+                            };
+
+                            // Bug/Feature: ShiftLeft up not triggered if ShiftRight is pressed, and vice versa
+                            // Solution: Fire release for both keys
+                            var ShiftLeftPressed = false;
+                            var ShiftRightPressed = false;
+
+                            var inputEvents = [];
+                            var lastInputTs = Date.now();
+
+                            // Mouse move handler: throttle to ips
+                            var lastMouseMoveTs = Date.now();
+                            mouseMoveEventHandler = function (event) {
+
+                                // Fire only inside viewbox & with throttling to ips
+                                var currentMouseMoveTs = Date.now();
+                                if (
+                                    app.viewport.width === 0 ||
+                                    app.viewport.height === 0 ||
+                                    currentMouseMoveTs - lastMouseMoveTs < 1000.0 / getProp('ips')
+                                ) return;
+
+                                let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
+                                let rectY = (app.canvas.clientHeight / 2) - (app.viewport.height / 2);
+
+                                if (
+                                    event.pageX >= rectX && event.pageX <= rectX + app.viewport.width &&
+                                    event.pageY >= rectY && event.pageY <= rectY + app.viewport.height
+                                ) {
+                                    let realX = Math.round((event.pageX - rectX) * app.remote.width / app.viewport.width);
+                                    let realY = Math.round((event.pageY - rectY) * app.remote.height / app.viewport.height);
+
+                                    inputEvents.push([
+                                        INPUT_EVENT_MOUSE_MOVE,
+                                        realX,
+                                        realY
+                                    ]);
+
+                                    lastMouseMoveTs = currentMouseMoveTs;
+                                }
+                            };
+
+                            // Mouse scroll handler: throttle to ips
+                            var lastMouseScrollTs = Date.now();
+                            mouseScrollEventHandler = function (event) {
+
+                                // Fire only inside viewbox & with throttling to ips
+                                var currentMouseScrollTs = Date.now();
+                                if (
+                                    app.viewport.width === 0 ||
+                                    app.viewport.height === 0 ||
+                                    currentMouseScrollTs - lastMouseScrollTs < 1000.0 / getProp('ips')
+                                ) return;
+
+                                let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
+                                let rectY = (app.canvas.clientHeight / 2) - (app.viewport.height / 2);
+
+                                if (
+                                    event.pageX >= rectX && event.pageX <= rectX + app.viewport.width &&
+                                    event.pageY >= rectY && event.pageY <= rectY + app.viewport.height
+                                ) {
+                                    let realX = Math.round((event.pageX - rectX) * app.remote.width / app.viewport.width);
+                                    let realY = Math.round((event.pageY - rectY) * app.remote.height / app.viewport.height);
+
+                                    inputEvents.push([
+                                        INPUT_EVENT_MOUSE_SCROLL,
+                                        realX,
+                                        realY,
+                                        -event.deltaY
+                                    ]);
+
+                                    lastMouseScrollTs = currentMouseScrollTs;
+                                }
+                            };
+
+                            // Mouse down handler: no throttle
+                            mouseDownEventHandler = function (event) {
+
+                                // Stop event
+                                event.preventDefault();
+                                event.stopPropagation();
+
+                                // Check
+                                if (app.remote.width === 0 || app.remote.height === 0)
+                                    return;
+
+                                let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
+                                let rectY = (app.canvas.clientHeight / 2) - (app.viewport.height / 2);
+
+                                if (
+                                    event.pageX >= rectX && event.pageX <= rectX + app.viewport.width &&
+                                    event.pageY >= rectY && event.pageY <= rectY + app.viewport.height
+                                ) {
+                                    let realX = Math.round((event.pageX - rectX) * app.remote.width / app.viewport.width);
+                                    let realY = Math.round((event.pageY - rectY) * app.remote.height / app.viewport.height);
+
+                                    inputEvents.push([
+                                        INPUT_EVENT_MOUSE_DOWN,
+                                        realX,
+                                        realY,
+                                        event.button,
+                                    ]);
+                                }
+                            };
+
+                            // Mouse up handler: no throttle
+                            mouseUpEventHandler = function (event) {
+
+                                // Stop event
+                                event.preventDefault();
+                                event.stopPropagation();
+
+                                // Check
+                                if (app.remote.width === 0 || app.remote.height === 0)
+                                    return;
+
+                                let rectX = (app.canvas.clientWidth / 2) - (app.viewport.width / 2);
+                                let rectY = (app.canvas.clientHeight / 2) - (app.viewport.height / 2);
+
+                                let realX = Math.round((event.pageX - rectX) * app.remote.width / app.viewport.width);
+                                let realY = Math.round((event.pageY - rectY) * app.remote.height / app.viewport.height);
+
+                                inputEvents.push([
+                                    INPUT_EVENT_MOUSE_UP,
+                                    realX,
+                                    realY,
+                                    event.button,
+                                ]);
+                            };
+
+                            // Context menu suppress
+                            contextMenuCancelEventHandler = function (event) {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                return false;
+                            };
+
+                            // Key down handler: throttle to ips
+                            var lastKeyDownTs = Date.now();
+                            keyDownEventHandler = function (event) {
+
+                                // Stop event
+                                event.preventDefault();
+                                event.stopPropagation();
+
+                                ShiftLeftPressed = ShiftLeftPressed || event.code === 'ShiftLeft';
+                                ShiftRightPressed = ShiftRightPressed || event.code === 'ShiftRight';
+
+                                // Prevent repetitive events spamming
+                                var currentKeyDownTs = Date.now();
+                                if (event.repeat && currentKeyDownTs - lastKeyDownTs < 1000.0 / getProp('ips'))
+                                    return;
+
+                                if (event.code in jsToPyKeys) {
+                                    inputEvents.push([
+                                        INPUT_EVENT_KEY_DOWN,
+                                        jsToPyKeys[event.code]
+                                    ]);
+
+                                    lastKeyDownTs = currentKeyDownTs;
+                                }
+
+                                return false;
+                            };
+
+                            // Key up handler: no throttle
+                            keyUpEventHandler = function (event) {
+
+                                // Stop event
+                                event.preventDefault();
+                                event.stopPropagation();
+
+                                if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
+                                    if (ShiftLeftPressed) {
+                                        inputEvents.push([
+                                            INPUT_EVENT_KEY_UP,
+                                            jsToPyKeys['ShiftLeft']
+                                        ]);
+                                    }
+
+                                    if (ShiftRightPressed) {
+                                        inputEvents.push([
+                                            INPUT_EVENT_KEY_UP,
+                                            jsToPyKeys['ShiftRight']
+                                        ]);
+                                    }
+
+                                    lastMouseScrollTs = Date.now();
+
+                                } else if (event.code in jsToPyKeys) {
+                                    inputEvents.push([
+                                        INPUT_EVENT_KEY_UP,
+                                        jsToPyKeys[event.code]
+                                    ]);
+
+                                    lastMouseScrollTs = Date.now();
+                                }
+
+                                return false;
+                            };
+
+                            // Attach handlers & start deferred sender
+                            function startInputLoop() {
+
+                                console.log('startInputLoop() : starting input loop');
+
+                                // Register listeners
+                                app.canvas.addEventListener('mousemove', mouseMoveEventHandler);
+                                app.canvas.addEventListener('wheel', mouseScrollEventHandler);
+                                app.canvas.addEventListener('mousedown', mouseDownEventHandler);
+                                app.canvas.addEventListener('mouseup', mouseUpEventHandler);
+                                app.canvas.addEventListener('contextmenu', contextMenuCancelEventHandler);
+
+                                document.addEventListener('keydown', keyDownEventHandler);
+                                document.addEventListener('keyup', keyUpEventHandler);
+
+                                // Input publisher
+                                var pushInput = function () {
+
+                                    // Exit all handlers/coroutines if they were called after socket close
+                                    if (!app.keepAlive || mySocketRef.readyState === WebSocket.CLOSED) {
+                                        try {
+                                            mySocketRef.close();
+                                        } catch {}
+                                        return;
+                                    }
+
+                                    try {
+                                        if (inputEvents.length) {
+                                            var inputEvents_ = inputEvents;
+                                            inputEvents_ = inputEvents;
+                                            inputEvents = [];
+
+                                            var serialized = JSON.stringify(inputEvents_);
+                                            var requestInput__buffer = new Uint8Array(1 + serialized.length);
+
+                                            // Send packet type
+                                            encode_int8(0x03, requestInput__buffer, 0);
+
+                                            // Send data
+                                            for (let ind = 0; ind < serialized.length; ++ind)
+                                                requestInput__buffer[ind + 1] = serialized.charCodeAt(ind);
+
+                                            // Actually, send
+                                            mySocketRef.send(requestInput__buffer.buffer);
+                                            lastInputTs = Date.now();
+
+                                            delete requestInput__buffer;
+                                        }
+                                    } catch (e) {
+                                        console.error(e);
+                                    }
+                                    setTimeout(pushInput, 1000.0 / getProp('ips'));
+                                };
+                                setTimeout(pushInput, 1000.0 / getProp('ips'));
+                            };
+
+                            // Detach all handlers & clear event queue
+                            function stopInputLoop() {
+                                console.info('stopInputLoop() : stopping input loop');
+
+                                app.canvas.removeEventListener('mousemove', mouseMoveEventHandler);
+                                app.canvas.removeEventListener('wheel', mouseScrollEventHandler);
+                                app.canvas.removeEventListener('mousedown', mouseDownEventHandler);
+                                app.canvas.removeEventListener('mouseup', mouseUpEventHandler);
+                                app.canvas.removeEventListener('contextmenu', contextMenuCancelEventHandler);
+
+                                document.removeEventListener('keydown', keyDownEventHandler);
+                                document.removeEventListener('keyup', keyUpEventHandler);
+
+                                inputEvents = [];
+                            };
+                        };
+
+                        // konnekt
+                        makeInputConnection();
+
+                    });
+
+                    console.log('startConnection() : exit');
+
+                };
+
+                app.stopConnection = async function() {
+
+                    console.log('stopConnection() : enter');
+
+                    // Disable self-reconnect
+                    app.keepAlive = false;
+
+                    // Wait for promises to exit based on keepAlive flag
+                    await app.viewPromise;
+                    await app.inputPromise;
+
+                    // Not running anymore, can start
+                    app.isConnectionRunning = false;
+
+                    // Clear network status
+                    netstatElement.textContent = '';
+
+                    console.log('stopConnection() : exit');
+                };
+
+                app.startConnection();
 			}) ();
 		</script>
 	</body>

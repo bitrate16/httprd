@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-VERSION = '4.1'
+VERSION = '4.2'
 
 import json
 import aiohttp
@@ -300,6 +300,7 @@ async def get__connect_view_ws(request: aiohttp.web.Request) -> aiohttp.web.Stre
                                 buffer.write(encode_int8(0x01))
 
                                 # Write body
+                                image = image.convert('RGB')
                                 image.save(fp=buffer, format='JPEG', quality=quality)
                                 last_frame = image
 
@@ -321,6 +322,7 @@ async def get__connect_view_ws(request: aiohttp.web.Request) -> aiohttp.web.Stre
 
                                 # Write body
                                 cropped = image.crop(diff_bbox)
+                                cropped = cropped.convert('RGB')
                                 cropped.save(fp=buffer, format='JPEG', quality=quality)
                                 last_frame = image
                                 partial_frames_since_last_full_repaint_frame += 1
